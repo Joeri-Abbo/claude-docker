@@ -41,13 +41,15 @@ from a registry, so "upgrading" means rebuilding — see
 
 In scope: the `run.sh` wrapper, `entrypoint.sh`, the `Dockerfile` and the image
 it produces, the credential opt-in model, the privilege drop and capability set,
-the `gh` auth-proxy sidecar, and the persistent named-volume model.
+the `gh` auth-proxy sidecar, the `--api` egress lock (reaching a host that
+isn't in `CLAUDE_DOCKER_EGRESS_POLICY`, metadata or a private range, or leaking
+data over DNS, in an `--api` session), and the persistent named-volume model.
 
 Out of scope, because they are documented properties rather than defects — read
 the [threat model](README.md#threat-model) before reporting:
 
-- **Full outbound network with no egress filtering.** There is no network
-  policy; a session can reach anything the host can.
+- **Full outbound network outside `--api`.** Without `--api`, a session can
+  reach anything the host can.
 - **Runtime code-fetch.** `npx`, `pnpm dlx`, `uvx`, `tfenv install` and the Go
   toolchain fetch and execute third-party code on demand, by design.
 - **Workspaces are read-write** unless `--ro` is passed.
