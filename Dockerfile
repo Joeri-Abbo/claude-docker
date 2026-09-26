@@ -233,6 +233,9 @@ RUN ARCH=$(dpkg --print-architecture); \
 # vendored deps are scanner findings. AZURE_DEVOPS_ORG_URL maps onto the
 # extension's default org. Before npm: az moves monthly, claude-code near-daily.
 COPY pins/az.env pins/azure-devops.env /tmp/
+# SC2016: the single-quoted $… lines are the az wrapper's own text, written
+# literally into /usr/local/bin/az and expanded when az runs, not at build time.
+# hadolint ignore=SC2016
 RUN . /tmp/az.env && . /tmp/azure-devops.env \
  && whl="/tmp/${AZURE_DEVOPS_URL##*/}" \
  && curl -fsSL "$AZURE_DEVOPS_URL" -o "$whl" \
