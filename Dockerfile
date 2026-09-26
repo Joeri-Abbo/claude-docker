@@ -231,7 +231,8 @@ RUN ARCH=$(dpkg --print-architecture); \
 # sha256 instead of the unpinned extension index. `-I` keeps PYTHONPATH and the
 # volume-backed user site out of az. Bundled pip deleted: uv installs, and pip's
 # vendored deps are scanner findings. AZURE_DEVOPS_ORG_URL maps onto the
-# extension's default org. Before npm: az moves monthly, claude-code near-daily.
+# extension's default org. REQUESTS_CA_BUNDLE points requests at the system
+# store (not certifi), so a --az private CA is trusted. Before npm: az moves monthly, claude-code near-daily.
 COPY pins/az.env pins/azure-devops.env /tmp/
 # SC2016: the single-quoted $… lines are the az wrapper's own text, written
 # literally into /usr/local/bin/az and expanded when az runs, not at build time.
@@ -247,6 +248,7 @@ RUN . /tmp/az.env && . /tmp/azure-devops.env \
  && uv pip install --no-cache --no-deps --python /opt/az/venv/bin/python \
       --target /opt/az/cliextensions/azure-devops "$whl" \
  && printf '%s\n' '#!/bin/sh' \
+      'export REQUESTS_CA_BUNDLE="${REQUESTS_CA_BUNDLE:-/etc/ssl/certs/ca-certificates.crt}"' \
       '[ -z "${AZURE_DEVOPS_ORG_URL:-}" ] || export AZURE_DEVOPS_EXT__DEFAULTS_ORGANIZATION="${AZURE_DEVOPS_EXT__DEFAULTS_ORGANIZATION:-$AZURE_DEVOPS_ORG_URL}"' \
       'AZURE_EXTENSION_DIR=/opt/az/cliextensions exec /opt/az/venv/bin/python -I -c "import sys; from azure.cli.core import get_default_cli; sys.exit(get_default_cli().invoke(sys.argv[1:]))" "$@"' \
       > /usr/local/bin/az \

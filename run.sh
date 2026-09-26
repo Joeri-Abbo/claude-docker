@@ -75,6 +75,9 @@ Wrapper flags:
                       (:ro) when present; unmask in-container ~/.azure state.
                       Never mounts the host's Azure token caches. Covers
                       az devops / repos / boards / pipelines only.
+                      REQUESTS_CA_BUNDLE (a host PEM, e.g. an on-prem
+                      Server's CA) is installed into the container's trust
+                      store.
   --registry          Opt in to private package registries: surface host-
                       native uv/npm/pnpm/pip config so in-container installs
                       resolve against a private feed. Mounts ~/.npmrc,
@@ -200,6 +203,15 @@ fi
 # failed `$(helper)` / `op read` stops here too.
 if [ "$WITH_API" = "1" ] && [ -z "${ANTHROPIC_AUTH_TOKEN:-}" ] && [ -z "${ANTHROPIC_API_KEY:-}" ]; then
   echo "claude-docker: --api needs ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY set (non-empty); without one, Claude Code sends your claude.ai OAuth token to the gateway" >&2
+  exit 1
+fi
+
+# --az private CA: REQUESTS_CA_BUNDLE is what az (python requests) reads on the
+# host, e.g. for an on-prem Azure DevOps Server. Its value is a host path, so it
+# is mounted and installed below rather than forwarded. A set-but-missing path
+# is fatal: skipping it would fail later at the first TLS handshake.
+if [ "$WITH_AZ" = "1" ] && [ -n "${REQUESTS_CA_BUNDLE:-}" ] && [ ! -f "$REQUESTS_CA_BUNDLE" ]; then
+  echo "claude-docker: REQUESTS_CA_BUNDLE '$REQUESTS_CA_BUNDLE' is not a file" >&2
   exit 1
 fi
 
@@ -447,6 +459,9 @@ fi
 if [ "$WITH_AZ" = "1" ]; then
   [ -f "$HOME/.azure/azureProfile.json" ] && MOUNT_ARGS+=("-v" "$(hostpath "$HOME/.azure/azureProfile.json"):/root/.azure/azureProfile.json:ro")
   [ -f "$HOME/.azure/clouds.config" ]     && MOUNT_ARGS+=("-v" "$(hostpath "$HOME/.azure/clouds.config"):/root/.azure/clouds.config:ro")
+  # Installed by the entrypoint's update-ca-certificates step (claude-docker-*.crt),
+  # so git/curl trust it too; the az wrapper points requests at the system bundle.
+  [ -n "${REQUESTS_CA_BUNDLE:-}" ] && MOUNT_ARGS+=("-v" "$(hostpath "$REQUESTS_CA_BUNDLE"):/usr/local/share/ca-certificates/claude-docker-az.crt:ro")
 fi
 
 # Private package registries: surface the host's native uv/npm/pnpm/pip registry
