@@ -220,13 +220,10 @@ setup_fake_api() {
   ENV_ARGS+=("-e" "ANTHROPIC_BASE_URL=https://llm.smoke.invalid")
 }
 
+# --az mounts no host file; the PAT is the whole credential, so it carries the
+# sentinel instead.
 setup_fake_az() {
-  mkdir -p "${CREDS_HOST}/azure"
-  printf '{"installationId": "SMOKE-SENTINEL-AZ", "subscriptions": []}\n' > "${CREDS_HOST}/azure/azureProfile.json"
-  MOUNT_ARGS+=(
-    "-v" "${CREDS_HOST}/azure/azureProfile.json:/root/.azure/azureProfile.json:ro"
-  )
-  ENV_ARGS+=("-e" "AZURE_DEVOPS_EXT_PAT=fake-azdo-pat")
+  ENV_ARGS+=("-e" "AZURE_DEVOPS_EXT_PAT=SMOKE-SENTINEL-AZ")
 }
 
 # Parse OPTINS and apply credential mounts; for non-granted opt-ins add tmpfs

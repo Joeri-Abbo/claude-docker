@@ -71,9 +71,8 @@ Wrapper flags:
   --az                Opt in to Azure DevOps (Services or on-prem Server):
                       forward AZURE_DEVOPS_EXT_PAT (the PAT) and
                       AZURE_DEVOPS_ORG_URL (default org, and so the host) when
-                      set; mount ~/.azure/azureProfile.json + clouds.config
-                      (:ro) when present; unmask in-container ~/.azure state.
-                      Never mounts the host's Azure token caches. Covers
+                      set; unmask in-container ~/.azure state. Mounts no
+                      host ~/.azure file (no profile, no token caches). Covers
                       az devops / repos / boards / pipelines only.
                       REQUESTS_CA_BUNDLE (a host PEM, e.g. an on-prem
                       Server's CA) is installed into the container's trust
@@ -452,13 +451,11 @@ if [ "$WITH_TFE" = "1" ]; then
     && MOUNT_ARGS+=("-v" "$(hostpath "$HOME/.terraform.d/credentials.tfrc.json"):/root/.terraform.d/credentials.tfrc.json:ro")
 fi
 
-# Azure DevOps: only the two non-secret az config files. msal_token_cache.json /
-# accessTokens.json (the AAD token caches) are never mounted — same line --aws
-# draws around ~/.aws/credentials. Auth is the PAT in AZURE_DEVOPS_EXT_PAT; the
-# host is whatever AZURE_DEVOPS_ORG_URL names (Services or an on-prem Server).
+# Azure DevOps: no host ~/.azure file is mounted. Auth is the PAT in
+# AZURE_DEVOPS_EXT_PAT and the host is whatever AZURE_DEVOPS_ORG_URL names
+# (Services or an on-prem Server); azureProfile.json would only carry tenant /
+# subscription IDs and the account name in, and the AAD token caches never are.
 if [ "$WITH_AZ" = "1" ]; then
-  [ -f "$HOME/.azure/azureProfile.json" ] && MOUNT_ARGS+=("-v" "$(hostpath "$HOME/.azure/azureProfile.json"):/root/.azure/azureProfile.json:ro")
-  [ -f "$HOME/.azure/clouds.config" ]     && MOUNT_ARGS+=("-v" "$(hostpath "$HOME/.azure/clouds.config"):/root/.azure/clouds.config:ro")
   # Installed by the entrypoint's update-ca-certificates step (claude-docker-*.crt),
   # so git/curl trust it too; the az wrapper points requests at the system bundle.
   [ -n "${REQUESTS_CA_BUNDLE:-}" ] && MOUNT_ARGS+=("-v" "$(hostpath "$REQUESTS_CA_BUNDLE"):/usr/local/share/ca-certificates/claude-docker-az.crt:ro")

@@ -284,7 +284,7 @@ optin_config_path() {
     aws)  echo "/root/.aws/config:AWS_PROFILE" ;;
     glab) echo "/root/.config/glab-cli:GITLAB_TOKEN" ;;
     tfe)  echo "/root/.terraform.d/credentials.tfrc.json:TF_TOKEN_app_terraform_io" ;;
-    az)   echo "/root/.azure/azureProfile.json:AZURE_DEVOPS_EXT_PAT" ;;
+    az)   echo "/root/.azure:AZURE_DEVOPS_EXT_PAT" ;;
     *)    echo "" ;;
   esac
 }
@@ -315,7 +315,14 @@ check_credentials() {
       done
     fi
 
-    if [ "$granted" = "1" ]; then
+    if [ "$granted" = "1" ] && [ "$optin" = "az" ]; then
+      # --az mounts no host file (/root/.azure is plain volume state), so the
+      # forwarded PAT is the fixture: it must be OUR sentinel.
+      case "${AZURE_DEVOPS_EXT_PAT:-}" in
+        *SMOKE-SENTINEL*) pass "optin-az-env: AZURE_DEVOPS_EXT_PAT carries the smoke sentinel" ;;
+        *)                fail "optin-az-env: AZURE_DEVOPS_EXT_PAT missing or not the smoke fixture" ;;
+      esac
+    elif [ "$granted" = "1" ]; then
       # Config path must exist and be read-only (mounted :ro by smoke.sh).
       if [ -e "$config_path" ]; then
         pass "optin-${optin}: config path exists: $config_path"

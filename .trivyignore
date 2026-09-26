@@ -35,6 +35,10 @@ CVE-2026-56864 exp:2026-11-04
 # against a fix that needs 0.40.0. Each entry carries its own reason because
 # suppression is per-ID and the two are only incidentally related.
 CVE-2026-56865 exp:2026-11-04
+# Scope note: trivy ignores are per-CVE-ID and image-wide, unlike the path- and
+# version-scoped .grype.yaml rule for the same two CVEs. That is fine while
+# /opt/az holds the image's only cryptography 48.x copy (pins/az-requirements.txt);
+# re-check if another component ever vendors cryptography.
 # az (/opt/az): azure-cli-core 2.90.0 pins msal==1.36.0, which caps
 # cryptography <49, so the venv resolves 48.0.1; the fix is 50.0.0. Full
 # azure-cli ships the same pin — only an azure-cli-core release that moves msal

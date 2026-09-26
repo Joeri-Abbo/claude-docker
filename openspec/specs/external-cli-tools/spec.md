@@ -42,9 +42,9 @@ Host credentials (files or env vars) SHALL NOT reach the container unless the us
   distinguishes it from proxied `gh`.
 - `--glab`: mount the platform-appropriate glab config dir — `~/Library/Application Support/glab-cli` on macOS, `~/.config/glab-cli` on Linux — at `/root/.config/glab-cli:ro`; forward `GITLAB_TOKEN` when set on the host.
 - `--tfe`: when present on the host, mount `~/.terraform.d/credentials.tfrc.json` at `/root/.terraform.d/credentials.tfrc.json:ro`; forward `TF_TOKEN_app_terraform_io` when set on the host. Targets `app.terraform.io` (HCP Terraform); self-hosted Terraform Enterprise hostnames and other `TF_TOKEN_<host>` variables are out of scope for this opt-in.
-- `--az`: forward `AZURE_DEVOPS_EXT_PAT` and `AZURE_DEVOPS_ORG_URL` when set on the host; when present on the host, mount `~/.azure/azureProfile.json` at `/root/.azure/azureProfile.json:ro` and `~/.azure/clouds.config` at `/root/.azure/clouds.config:ro`. `AZURE_DEVOPS_ORG_URL` SHALL be the only source of the Azure DevOps hostname — nothing SHALL assume `dev.azure.com`, so Azure DevOps Server (on-prem, custom hostname) works the same as Services. `run.sh` SHALL NOT attempt host-side PAT discovery (`az` has no command that prints a usable PAT). When `REQUESTS_CA_BUNDLE` is set on the host, `run.sh` SHALL mount the file it names read-only at `/usr/local/share/ca-certificates/claude-docker-az.crt`, the entrypoint SHALL install it into the system trust store before the privilege drop, and `az` SHALL use the system bundle; the host value itself SHALL NOT be forwarded. When it is set but does not name a file, `run.sh` SHALL exit 1 before starting any container. Targets the `azure-devops` extension only; general Azure resource management and its credentials (`ARM_*`, `AZURE_CLIENT_SECRET`, service principals) are out of scope for this opt-in.
+- `--az`: forward `AZURE_DEVOPS_EXT_PAT` and `AZURE_DEVOPS_ORG_URL` when set on the host, and SHALL NOT mount any host `~/.azure` file: the PAT is the whole credential, and the profile would only carry tenant / subscription IDs and the account name into the container. `AZURE_DEVOPS_ORG_URL` SHALL be the only source of the Azure DevOps hostname — nothing SHALL assume `dev.azure.com`, so Azure DevOps Server (on-prem, custom hostname) works the same as Services. `run.sh` SHALL NOT attempt host-side PAT discovery (`az` has no command that prints a usable PAT). When `REQUESTS_CA_BUNDLE` is set on the host, `run.sh` SHALL mount the file it names read-only at `/usr/local/share/ca-certificates/claude-docker-az.crt`, the entrypoint SHALL install it into the system trust store before the privilege drop, and `az` SHALL use the system bundle; the host value itself SHALL NOT be forwarded. When it is set but does not name a file, `run.sh` SHALL exit 1 before starting any container. Targets the `azure-devops` extension only; general Azure resource management and its credentials (`ARM_*`, `AZURE_CLIENT_SECRET`, service principals) are out of scope for this opt-in.
 
-All credential bind-mounts SHALL be read-only so a compromised container cannot rewrite host config or tokens. `~/.aws/credentials` and `~/.aws/cli/cache/` SHALL NEVER be mounted, even under `--aws`. Likewise nothing under `~/.azure/` other than `azureProfile.json` and `clouds.config` SHALL be mounted under `--az` — in particular never the Azure token caches `msal_token_cache.json` or `accessTokens.json`.
+All credential bind-mounts SHALL be read-only so a compromised container cannot rewrite host config or tokens. `~/.aws/credentials` and `~/.aws/cli/cache/` SHALL NEVER be mounted, even under `--aws`. Likewise nothing under `~/.azure/` SHALL be mounted under `--az` — in particular never the Azure token caches `msal_token_cache.json` or `accessTokens.json`.
 
 The container's own `/root/.aws/cli/cache/` SHALL NOT survive the session that
 wrote it. The AWS CLI caches assume-role and SSO-derived STS credentials there,
@@ -150,8 +150,8 @@ copied in from the host or derived inside the container.
 
 - **GIVEN** the host has `~/.azure/azureProfile.json`, `~/.azure/clouds.config` and `~/.azure/msal_token_cache.json`
 - **WHEN** user runs `claude-docker --az ~/repo`
-- **THEN** `/root/.azure/azureProfile.json` and `/root/.azure/clouds.config` are readable inside the container and writes to them fail with EROFS
-- **AND** `/root/.azure/msal_token_cache.json` is not present inside the container
+- **THEN** none of those files is present under `/root/.azure` inside the container
+- **AND** `AZURE_DEVOPS_EXT_PAT` carries the host's value
 
 #### Scenario: --az trusts the host REQUESTS_CA_BUNDLE
 
@@ -352,7 +352,7 @@ Bedrock, Vertex, and Foundry provider selection (`CLAUDE_CODE_USE_BEDROCK`, `CLA
 
 ### Requirement: az with the azure-devops extension installed
 
-The container image SHALL ship an `az` command on the default PATH that runs the `azure-devops` extension (`az devops`, `az repos`, `az boards`, `az pipelines`) on both `amd64` and `arm64`. It SHALL be built from `azure-cli-core` plus the extension, not the full `azure-cli` distribution. `azure-cli-core` SHALL be version-pinned via `pins/az.env`; the extension SHALL be installed from the wheel URL recorded in `pins/azure-devops.env` after verifying it against the sha256 recorded there, not via the unpinned extension index. The Python runtime and all az files SHALL live outside `/root` and SHALL NOT add a `python` / `python3` to the default PATH. The build SHALL fail if the extension does not load.
+The container image SHALL ship an `az` command on the default PATH that runs the `azure-devops` extension (`az devops`, `az repos`, `az boards`, `az pipelines`) on both `amd64` and `arm64`. It SHALL be built from `azure-cli-core` plus the extension, not the full `azure-cli` distribution. `azure-cli-core` SHALL be version-pinned via `pins/az.env`, and it and every transitive dependency SHALL be installed with `--require-hashes` from the hash-locked `pins/az-requirements.txt`; the build SHALL fail if the lock does not pin the `pins/az.env` version. the extension SHALL be installed from the wheel URL recorded in `pins/azure-devops.env` after verifying it against the sha256 recorded there, not via the unpinned extension index. The Python runtime and all az files SHALL live outside `/root` and SHALL NOT add a `python` / `python3` to the default PATH. The build SHALL fail if the extension does not load. The `az` wrapper SHALL set `AZURE_CORE_COLLECT_TELEMETRY=no`.
 
 #### Scenario: az devops present
 
@@ -365,3 +365,9 @@ The container image SHALL ship an `az` command on the default PATH that runs the
 - **GIVEN** a build where the downloaded wheel does not match `AZURE_DEVOPS_SHA256`
 - **WHEN** the Dockerfile runs `sha256sum -c`
 - **THEN** the build fails before anything is installed
+
+#### Scenario: az deps are hash-locked
+
+- **GIVEN** `pins/az-requirements.txt` lists a dependency without a `--hash`, or pins an `azure-cli-core` version other than `pins/az.env`'s
+- **WHEN** the image is built
+- **THEN** the build fails

@@ -227,34 +227,40 @@ RUN ARCH=$(dpkg --print-architecture); \
  && /usr/local/go/bin/go version
 
 # Azure DevOps CLI: azure-cli-core + the azure-devops extension, not full
-# azure-cli (~500 MB of unused service modules). Extension wheel pinned by
-# sha256 instead of the unpinned extension index. `-I` keeps PYTHONPATH and the
-# volume-backed user site out of az. Bundled pip deleted: uv installs, and pip's
-# vendored deps are scanner findings. AZURE_DEVOPS_ORG_URL maps onto the
-# extension's default org. REQUESTS_CA_BUNDLE points requests at the system
-# store (not certifi), so a --az private CA is trusted. Before npm: az moves monthly, claude-code near-daily.
-COPY pins/az.env pins/azure-devops.env /tmp/
+# azure-cli (~500 MB of unused service modules). azure-cli-core and every
+# transitive dep come from pins/az-requirements.txt (--require-hashes), the lock
+# update_pins.py writes with pins/az.env; the build fails if they disagree.
+# Extension wheel pinned by sha256 instead of the unpinned extension index.
+# `-I` keeps PYTHONPATH and the volume-backed user site out of az. Bundled pip
+# deleted: uv installs, and pip's vendored deps are scanner findings. The
+# wrapper forces telemetry off (not relying on bypassing azure-cli's __main__),
+# points requests at the system store instead of certifi so a --az private CA
+# is trusted, and maps AZURE_DEVOPS_ORG_URL onto the extension's default org.
+# Before npm: az moves monthly, claude-code near-daily.
+COPY pins/az.env pins/azure-devops.env pins/az-requirements.txt /tmp/
 # SC2016: the single-quoted $… lines are the az wrapper's own text, written
 # literally into /usr/local/bin/az and expanded when az runs, not at build time.
 # hadolint ignore=SC2016
 RUN . /tmp/az.env && . /tmp/azure-devops.env \
+ && grep -q "^azure-cli-core==${AZ_VERSION} " /tmp/az-requirements.txt \
  && whl="/tmp/${AZURE_DEVOPS_URL##*/}" \
  && curl -fsSL "$AZURE_DEVOPS_URL" -o "$whl" \
  && echo "${AZURE_DEVOPS_SHA256}  ${whl}" | sha256sum -c - \
  && UV_PYTHON_INSTALL_DIR=/opt/az/python uv venv --no-cache --managed-python --python 3.13 /opt/az/venv \
  && rm -rf /opt/az/python/cpython-*/bin/pip* /opt/az/python/cpython-*/lib/python3*/site-packages/pip* \
  && uv pip install --no-cache --python /opt/az/venv/bin/python \
-      "azure-cli-core==${AZ_VERSION}" python-dateutil msrest azure-common \
+      --require-hashes -r /tmp/az-requirements.txt \
  && uv pip install --no-cache --no-deps --python /opt/az/venv/bin/python \
       --target /opt/az/cliextensions/azure-devops "$whl" \
  && printf '%s\n' '#!/bin/sh' \
+      'export AZURE_CORE_COLLECT_TELEMETRY=no' \
       'export REQUESTS_CA_BUNDLE="${REQUESTS_CA_BUNDLE:-/etc/ssl/certs/ca-certificates.crt}"' \
       '[ -z "${AZURE_DEVOPS_ORG_URL:-}" ] || export AZURE_DEVOPS_EXT__DEFAULTS_ORGANIZATION="${AZURE_DEVOPS_EXT__DEFAULTS_ORGANIZATION:-$AZURE_DEVOPS_ORG_URL}"' \
       'AZURE_EXTENSION_DIR=/opt/az/cliextensions exec /opt/az/venv/bin/python -I -c "import sys; from azure.cli.core import get_default_cli; sys.exit(get_default_cli().invoke(sys.argv[1:]))" "$@"' \
       > /usr/local/bin/az \
  && chmod 0755 /usr/local/bin/az \
  && AZURE_CONFIG_DIR=/tmp/azcfg az devops -h > /dev/null \
- && rm -rf "$whl" /tmp/azcfg /tmp/az.env /tmp/azure-devops.env
+ && rm -rf "$whl" /tmp/azcfg /tmp/az.env /tmp/azure-devops.env /tmp/az-requirements.txt
 
 # npm-backed CLIs — pinned versions. Trust = npm's signed dist.integrity;
 # run `npm audit signatures <pkg>@<ver>` when bumping.

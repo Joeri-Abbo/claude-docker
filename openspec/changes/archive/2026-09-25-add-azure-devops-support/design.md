@@ -69,7 +69,7 @@ resolve at build time within core's own (mostly exact) pins.
 There is no `az` analogue of `gh auth token` that prints a usable PAT —
 `az devops login` consumes one from stdin. So `--az` forwards
 `AZURE_DEVOPS_EXT_PAT` (the extension's native PAT variable) by bare name.
-Where the PAT comes from on the host is #73's concern (`op://` resolution).
+Where the PAT comes from on the host is the user's environment; to keep it in 1Password, launch through `op run --no-masking -- claude-docker --az …` with `AZURE_DEVOPS_EXT_PAT=op://…` (#73 was closed in favour of `op run`).
 `az devops login` itself does not work in the image: it wants `keyring`, which
 the extension tries to `pip install` at runtime, and there is no pip in the
 venv. That is acceptable — it would only persist a PAT onto the shared volume.
