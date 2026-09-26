@@ -81,7 +81,9 @@ Wrapper flags:
                       forward ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN /
                       ANTHROPIC_API_KEY / ANTHROPIC_CUSTOM_HEADERS /
                       ANTHROPIC_MODEL / ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL
-                      / ANTHROPIC_SMALL_FAST_MODEL when set. The endpoint
+                      / ANTHROPIC_SMALL_FAST_MODEL /
+                      CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS /
+                      CLAUDE_CODE_MAX_CONTEXT_TOKENS when set. The endpoint
                       receives all prompt content. Private CA: see
                       CLAUDE_DOCKER_API_CA. Bedrock/Vertex not covered.
                       Requires ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY.
@@ -485,7 +487,10 @@ ENV_VARS=()
 [ "$WITH_REGISTRY" = "1" ] && ENV_VARS+=(npm_config_registry NPM_CONFIG_REGISTRY NODE_AUTH_TOKEN NPM_TOKEN UV_INDEX_URL UV_DEFAULT_INDEX UV_EXTRA_INDEX_URL UV_INDEX UV_KEYRING_PROVIDER PIP_INDEX_URL PIP_EXTRA_INDEX_URL PIP_TRUSTED_HOST PIPENV_PYPI_MIRROR)
 # --api: Claude Code endpoint vars (code.claude.com/docs/en/env-vars). Bedrock/
 # Vertex/Foundry (CLAUDE_CODE_USE_*) are deliberately out of scope for now.
-[ "$WITH_API" = "1" ] && ENV_VARS+=(ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_CUSTOM_HEADERS ANTHROPIC_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL ANTHROPIC_SMALL_FAST_MODEL)
+# DISABLE_EXPERIMENTAL_BETAS: gateways to non-Anthropic models often reject
+# anthropic-beta headers. MAX_CONTEXT_TOKENS: gateway model IDs are unknown to
+# Claude Code, so it can't infer their context window for auto-compact.
+[ "$WITH_API" = "1" ] && ENV_VARS+=(ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_CUSTOM_HEADERS ANTHROPIC_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL ANTHROPIC_SMALL_FAST_MODEL CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS CLAUDE_CODE_MAX_CONTEXT_TOKENS)
 # Guarded: bash 3.2 under `set -u` errors on empty-array expansion.
 if [ "${#ENV_VARS[@]}" -gt 0 ]; then
   for v in "${ENV_VARS[@]}"; do

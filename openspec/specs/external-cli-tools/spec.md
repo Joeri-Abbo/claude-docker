@@ -268,7 +268,7 @@ The container image SHALL ship with `tfenv` on the default PATH so users can fet
 
 ### Requirement: Custom model endpoint opt-in
 
-Claude Code endpoint configuration SHALL NOT reach the container unless the user passes `--api`. Under `--api`, `run.sh` SHALL forward each of `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_CUSTOM_HEADERS`, `ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_OPUS_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`, `ANTHROPIC_DEFAULT_HAIKU_MODEL`, and `ANTHROPIC_SMALL_FAST_MODEL` that is set on the host, by bare name (`-e NAME`) so no value appears on the wrapper's `docker run` argv. The mode SHALL surface as an `api` entry in `CLAUDE_DOCKER_FLAGS`.
+Claude Code endpoint configuration SHALL NOT reach the container unless the user passes `--api`. Under `--api`, `run.sh` SHALL forward each of `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_CUSTOM_HEADERS`, `ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_OPUS_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`, `ANTHROPIC_DEFAULT_HAIKU_MODEL`, `ANTHROPIC_SMALL_FAST_MODEL`, `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS`, and `CLAUDE_CODE_MAX_CONTEXT_TOKENS` that is set on the host, by bare name (`-e NAME`) so no value appears on the wrapper's `docker run` argv. The mode SHALL surface as an `api` entry in `CLAUDE_DOCKER_FLAGS`.
 
 Under `--api`, when neither `ANTHROPIC_AUTH_TOKEN` nor `ANTHROPIC_API_KEY` is set to a non-empty value on the host, `run.sh` SHALL exit with status 1 and an error naming both variables before starting any container. Without a gateway token, Claude Code sends the claude.ai OAuth token from the volume to `ANTHROPIC_BASE_URL` as its bearer.
 
@@ -307,3 +307,10 @@ Bedrock, Vertex, and Foundry provider selection (`CLAUDE_CODE_USE_BEDROCK`, `CLA
 - **WHEN** user runs `claude-docker --api ~/repo`
 - **THEN** `run.sh` exits 1 with an error naming `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_API_KEY`
 - **AND** no container starts
+
+#### Scenario: --api forwards gateway knobs
+
+- **GIVEN** the host exports `ANTHROPIC_AUTH_TOKEN=tok`, `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1` and `CLAUDE_CODE_MAX_CONTEXT_TOKENS=1000000`
+- **WHEN** user runs `claude-docker --api ~/repo`
+- **THEN** both knobs carry the host values inside the container
+- **AND** without `--api` neither is set inside the container
