@@ -1,9 +1,4 @@
-# api-egress-policy Specification
-
-## Purpose
-Make the model traffic of every `--api` session provable: the agent container has no route off the host, so a per-session forward proxy sees every connection. The proxy lets model traffic reach only the `ANTHROPIC_BASE_URL` endpoint, refuses the model providers' own hosts, and leaves other hosts open. Its log is saved on the host, and `--report` turns the saved logs into an audit PDF. Sessions without `--api` are unaffected.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: --api blocks all network egress
 
@@ -35,20 +30,6 @@ When `--api` is passed and the `--gh` sidecar is active, the gh sidecar SHALL ad
 - **THEN** TLS verifies against the gh sidecar's session CA
 - **AND** GitHub's response reaches the client, which proves the gh sidecar forwarded the request upstream
 
-### Requirement: Fail-closed lifecycle
-
-The internal network, the outbound network and the proxy sidecar SHALL be named per session (`claude-egress-<id>`, `claude-egress-out-<id>`, `claude-egress-proxy-<id>`) and removed by the EXIT trap, which SHALL be installed before any of them is created. Failure to create either network, to start the proxy, or to detect it accepting connections within 15 seconds, or the proxy exiting during startup, SHALL abort the session before the agent container starts. It SHALL never fall back to unfiltered egress. The startup prune SHALL remove stopped `claude-egress-proxy-*` containers and unused `claude-egress-*` networks.
-
-#### Scenario: Proxy fails to start
-
-- **WHEN** the proxy sidecar exits during startup
-- **THEN** `run.sh` exits non-zero, prints the proxy's last log lines, and never starts the agent container
-
-#### Scenario: Teardown
-
-- **WHEN** an `--api` session exits
-- **THEN** no `claude-egress-*` container or network from that session remains
-
 ### Requirement: Denied hosts are reported to the user
 
 `run.sh` SHALL print the proxy sidecar's name, the model endpoint and the log directory to stderr at startup. When the session ends, it SHALL print every distinct host the proxy denied during the session after `egress proxy blocked:`, and the path of the saved log.
@@ -59,6 +40,30 @@ The internal network, the outbound network and the proxy sidecar SHALL be named 
 - **WHEN** the session exits
 - **THEN** stderr contains `egress proxy blocked:` followed by a list that includes `api.anthropic.com`
 - **AND** stderr names the saved log file
+
+## REMOVED Requirements
+
+### Requirement: The network, not the proxy, is the boundary
+
+**Reason**: Replaced by "The network is the boundary, so the proxy log is complete", which drops the allowlist wording.
+**Migration**: None.
+
+### Requirement: Metadata, loopback and private destinations are denied by resolved address
+
+**Reason**: Replaced by "Metadata and loopback destinations are denied by resolved address". Private ranges are reachable, as without `--api`, and unlisted names are no longer a concept.
+**Migration**: None.
+
+### Requirement: The host-side policy file is the only allowlist
+
+**Reason**: Only model traffic has to stay in the EU; a list of every host a session may reach costs each user configuration effort and hurts adoption.
+**Migration**: None needed; `--api` and the policy file are unreleased. Unset `CLAUDE_DOCKER_EGRESS_POLICY`.
+
+### Requirement: The model endpoint must be in the policy
+
+**Reason**: There is no policy file. The endpoint is always allowed, and replaced by "Model traffic reaches only the configured endpoint".
+**Migration**: Set `ANTHROPIC_BASE_URL`.
+
+## ADDED Requirements
 
 ### Requirement: Model traffic reaches only the configured endpoint
 

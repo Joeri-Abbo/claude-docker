@@ -96,11 +96,18 @@ Wrapper flags:
                       receives all prompt content. Private CA: see
                       CLAUDE_DOCKER_API_CA. Bedrock/Vertex not covered.
                       Requires ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY.
-                      Blocks ALL network egress: the container joins an
-                      --internal network and reaches only the hosts in
-                      CLAUDE_DOCKER_EGRESS_POLICY, via a squid sidecar
-                      (HTTPS via CONNECT, no TLS interception). Blocked
-                      hosts are listed when the session ends.
+                      Requires ANTHROPIC_BASE_URL. Locks model traffic to
+                      that endpoint: the container joins an --internal
+                      network and goes out only via a squid sidecar
+                      (HTTPS via CONNECT, no TLS interception) that refuses
+                      *.anthropic.com / *.claude.ai / *.claude.com and logs
+                      every connection. Other hosts stay reachable. The log
+                      is saved on the host when the session ends.
+  --report[=FILE]     Build the --api egress audit PDF (default
+                      egress-report.pdf) from the saved session logs, then
+                      exit. Needs python3 on the host. Exits 1 if any
+                      session reached a model provider other than its
+                      endpoint.
   --iterm             Wrap claude in tmux -CC (iTerm2 control mode → native
                       panes). Equivalent to CLAUDE_DOCKER_TMUX=cc.
   --tmux              Wrap claude in plain tmux (works in any terminal).
@@ -134,13 +141,9 @@ Environment:
   CLAUDE_DOCKER_API_CA     Path to a PEM CA certificate for the --api endpoint;
                            installed into the container's trust store. Ignored
                            without --api.
-  CLAUDE_DOCKER_EGRESS_POLICY Path to egress-policy.yaml, the only hosts an
-                           --api session can reach. Nothing is implied: list
-                           the model endpoint too. Format: an 'allow:' key,
-                           then '  - host.example.com' (exact), '  - .example.com'
-                           (domain + subdomains) or '  - 10.0.0.0/8' (IPv4/CIDR,
-                           the only way to reach a private range) items.
-                           Anything else aborts startup.
+  XDG_STATE_HOME           --api egress logs are saved under
+                           $XDG_STATE_HOME/claude-docker/egress (default
+                           ~/.local/state/claude-docker/egress).
 
 Credentials are off by default; combine opt-ins as needed:
   claude-docker --aws --gh ~/repo
@@ -171,6 +174,7 @@ WITH_TFE=0
 WITH_AZ=0
 WITH_REGISTRY=0
 WITH_API=0
+REPORT_OUT=
 CLAUDE_CONFIG_DIR="${CLAUDE_DOCKER_CONFIG_DIR:-$HOME/.claude}"
 saw_sep=0
 for arg in "$@"; do
@@ -191,6 +195,8 @@ for arg in "$@"; do
     --az)           WITH_AZ=1 ;;
     --registry)     WITH_REGISTRY=1 ;;
     --api)          WITH_API=1 ;;
+    --report)       REPORT_OUT=egress-report.pdf ;;
+    --report=*)     REPORT_OUT="${arg#--report=}" ;;
     --iterm)        CLAUDE_DOCKER_TMUX=cc ;;
     --tmux)         CLAUDE_DOCKER_TMUX=1 ;;
     --claude-dir=*) CLAUDE_CONFIG_DIR="${arg#--claude-dir=}" ;;
@@ -199,6 +205,20 @@ for arg in "$@"; do
   esac
 done
 [ "${#WORKSPACES[@]}" -eq 0 ] && WORKSPACES=("$PWD")
+
+# --api sessions save their egress log here (egress_save_log); --report turns
+# them into the audit PDF and exits, starting nothing. egress_report.py sits
+# next to this script, so resolve the ~/bin/claude-docker symlink first.
+EGRESS_LOG_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/claude-docker/egress"
+if [ -n "$REPORT_OUT" ]; then
+  self="${BASH_SOURCE[0]}"
+  while [ -L "$self" ]; do
+    link=$(readlink "$self")
+    case "$link" in /*) self="$link" ;; *) self="$(dirname "$self")/$link" ;; esac
+  done
+  command -v python3 >/dev/null 2>&1 || { echo "claude-docker: --report needs python3 on the host" >&2; exit 1; }
+  exec python3 "$(dirname "$self")/egress_report.py" "$EGRESS_LOG_DIR" "$REPORT_OUT"
+fi
 
 # --gh (auth-proxy sidecar) and --gh-direct (legacy forwarding) are mutually
 # exclusive strategies for the same credential — picking one silently would
@@ -217,85 +237,37 @@ if [ "$WITH_API" = "1" ] && [ -z "${ANTHROPIC_AUTH_TOKEN:-}" ] && [ -z "${ANTHRO
   exit 1
 fi
 
-# Validate one egress-policy entry and file it as a hostname (EGRESS_HOSTS) or
-# an IPv4 address/CIDR (EGRESS_DSTS). The input comes from a host-side file
-# only — never from a workspace — but it is still written into a config the
-# sidecar executes. An invalid entry aborts the run:
-# skipping it would leave the user with a boundary that looks like it works.
-egress_ip_re='^[0-9]{1,3}(\.[0-9]{1,3}){3}(/[0-9]{1,2})?$'
-egress_host_re='^\.?([A-Za-z0-9-]+\.)*[A-Za-z0-9-]+$'
-egress_add() {
-  if [[ $1 =~ $egress_ip_re ]]; then
-    EGRESS_DSTS+=("$1")
-  elif [ "${#1}" -le 253 ] && [[ $1 =~ $egress_host_re ]]; then
-    EGRESS_HOSTS+=("$1")
-  else
-    printf 'claude-docker: invalid egress-policy entry %q (%s) — expected host.example.com, .example.com, or an IPv4 address/CIDR\n' "$1" "$2" >&2
+# --api egress lock: every connection goes through a logging squid sidecar
+# (see api-egress-policy), and model traffic may reach only the configured
+# endpoint. Everything else stays open: only model traffic has to stay in the
+# EU, and an allowlist of every git/npm/pypi host would be a list each user
+# maintains. The endpoint must be set: unset, Claude Code talks to
+# api.anthropic.com, which the lock refuses. Checked before runtime detection,
+# so a bad value aborts with nothing to undo.
+# ponytail: providers are Anthropic's hosts only, because Claude Code talks to
+# nothing else; add others if a tool in the image gains a model backend.
+EGRESS_MODEL_PROVIDERS=".anthropic.com .claude.ai .claude.com"
+if [ "$WITH_API" = "1" ]; then
+  if [ -z "${ANTHROPIC_BASE_URL:-}" ]; then
+    echo "claude-docker: --api needs ANTHROPIC_BASE_URL (your model gateway); without it Claude Code calls api.anthropic.com, which --api blocks" >&2
     exit 1
   fi
-}
-
-# --api egress lock. An --api session reaches only the hosts listed in the
-# host-side CLAUDE_DOCKER_EGRESS_POLICY file (egress-policy.yaml). Nothing is
-# implied — not the Anthropic API, not the gateway, not the hosts of other
-# opt-ins — so that one file is the whole, auditable list. Parsed here, before
-# runtime detection, so a bad file aborts with nothing to undo. The format is a
-# strict YAML subset read line by line (no YAML parser on the host or in the
-# image): one top-level `allow:` key, then `  - entry` items, with comments.
-# Any other line aborts; so does an entry egress_add rejects, which also
-# covers quotes, flow syntax, anchors and tags.
-EGRESS_HOSTS=()
-EGRESS_DSTS=()
-if [ "$WITH_API" = "1" ]; then
-  egress_policy="${CLAUDE_DOCKER_EGRESS_POLICY:-}"
-  if [ -n "$egress_policy" ]; then
-    if [ ! -f "$egress_policy" ] || [ ! -r "$egress_policy" ]; then
-      echo "claude-docker: CLAUDE_DOCKER_EGRESS_POLICY '$egress_policy' is not a readable file" >&2
-      exit 1
-    fi
-    egress_skip_re='^[[:space:]]*(#.*)?$'
-    egress_key_re='^allow:[[:space:]]*(#.*)?$'
-    egress_item_re='^ +- +([^ #]+) *( #.*)?$'
-    egress_n=0
-    egress_in_allow=0
-    while IFS= read -r egress_line || [ -n "$egress_line" ]; do
-      egress_n=$((egress_n + 1))
-      egress_line="${egress_line%$'\r'}"
-      if [[ $egress_line =~ $egress_skip_re ]]; then
-        continue
-      elif [ "$egress_in_allow" = "0" ] && [[ $egress_line =~ $egress_key_re ]]; then
-        egress_in_allow=1
-      elif [ "$egress_in_allow" = "1" ] && [[ $egress_line =~ $egress_item_re ]]; then
-        egress_add "${BASH_REMATCH[1]}" "$egress_policy:$egress_n"
-      else
-        printf "claude-docker: %s:%s: unsupported line %q — egress-policy.yaml takes one 'allow:' key followed by '  - host' items\n" "$egress_policy" "$egress_n" "$egress_line" >&2
-        exit 1
-      fi
-    done < "$egress_policy"
-  fi
-  # Fail fast when the model endpoint itself is not listed: the session could
-  # not make a single request. This doesn't open the host, it only replaces a
-  # confusing first-request failure with an error naming the file.
-  # ANTHROPIC_BASE_URL is scheme://[userinfo@]host[:port][/path].
-  egress_api_host="${ANTHROPIC_BASE_URL:-https://api.anthropic.com}"
-  egress_api_host="${egress_api_host#*://}"
+  # ANTHROPIC_BASE_URL is scheme://[userinfo@]host[:port][/path]. The host is
+  # written into the squid config, so it must pass the validator first.
+  egress_api_host="${ANTHROPIC_BASE_URL#*://}"
   egress_api_host="${egress_api_host%%/*}"
   egress_api_host="${egress_api_host##*@}"
   egress_api_host="${egress_api_host%:*}"
-  egress_api_ok=0
-  # ponytail: an IP-literal endpoint skips this check (squid still enforces
-  # the policy); add CIDR containment here if someone needs the early error.
-  [[ $egress_api_host =~ $egress_ip_re ]] && egress_api_ok=1
-  for h in ${EGRESS_HOSTS[@]+"${EGRESS_HOSTS[@]}"}; do
-    case "$h" in
-      .*) case "$egress_api_host" in "${h#.}"|*"$h") egress_api_ok=1 ;; esac ;;
-      *)  [ "$h" = "$egress_api_host" ] && egress_api_ok=1 ;;
-    esac
-  done
-  if [ "$egress_api_ok" = "0" ]; then
-    echo "claude-docker: --api blocks all egress, and the model endpoint '$egress_api_host' is not in CLAUDE_DOCKER_EGRESS_POLICY (${egress_policy:-unset}) — add '  - $egress_api_host' under 'allow:'" >&2
+  if [ "${#egress_api_host}" -gt 253 ] || ! [[ $egress_api_host =~ ^([A-Za-z0-9-]+\.)*[A-Za-z0-9-]+$ ]]; then
+    printf 'claude-docker: ANTHROPIC_BASE_URL host %q is not a valid hostname or IPv4 address\n' "$egress_api_host" >&2
     exit 1
   fi
+  for p in $EGRESS_MODEL_PROVIDERS; do
+    case "$egress_api_host" in "${p#.}"|*"$p")
+      echo "claude-docker: --api blocks model providers' own hosts, and ANTHROPIC_BASE_URL points at one ('$egress_api_host') — set it to your gateway" >&2
+      exit 1 ;;
+    esac
+  done
 fi
 
 # --az private CA: REQUESTS_CA_BUNDLE is what az (python requests) reads on the
@@ -480,20 +452,18 @@ EOF
 
 # Emit the --api egress-lock squid config to stdout (see api-egress-policy
 # design.md). A template, unlike the gh Caddyfile: squid has no env
-# substitution for ACL values. Its only inputs are EGRESS_HOSTS / EGRESS_DSTS,
-# and every element of those has already passed egress_add's validator, so no
-# whitespace, quote, or newline can reach this file.
+# substitution for ACL values. Its only variable input is egress_api_host,
+# which has already passed the hostname validator above, so no whitespace,
+# quote, or newline can reach this file.
 # Rule order is the security property:
-#  - unlisted names are refused BEFORE any `dst` ACL, because a `dst` ACL
-#    makes squid resolve the name. Without that ordering, a denied
-#    CONNECT <secret>.attacker.example still leaks <secret> to the attacker's
-#    DNS server.
-#  - metadata/link-local and loopback are refused next, above every allow.
-#  - allowlisted CIDRs (and the --gh sidecar's /32) come next, then the
-#    private-range deny. `dst` matches the address squid RESOLVED, so an
-#    allowlisted name that resolves inward is refused (DNS-rebinding defence).
+#  - metadata/link-local and loopback are refused first, above every allow.
+#  - the model endpoint is allowed BEFORE the provider deny, then every other
+#    host is allowed: only model traffic is restricted.
 #  - `-n` stops a reverse lookup, so a PTR record can't turn an IP-literal
 #    request into an allowed name.
+# ponytail: a CONNECT to a provider's raw IP isn't matched by the dstdomain
+# deny. Claude Code never does that, and it would still show up in the log
+# and the report; add the providers' published ranges if that's not enough.
 gen_egress_squid_conf() {
   cat <<'EOF'
 http_port 3128
@@ -512,43 +482,45 @@ httpd_suppress_version_string on
 acl CONNECT method CONNECT
 acl egress_ports port 80 443
 acl egress_tls_port port 443
-acl egress_ip_literal dstdom_regex -n ^[0-9.]+$ :
 acl egress_metadata_names dstdomain -n metadata.google.internal metadata.azure.internal
 acl egress_linklocal dst 169.254.0.0/16 fe80::/10
 acl egress_loopback dst 127.0.0.0/8 0.0.0.0/8 ::1
-acl egress_private dst 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 100.64.0.0/10 fc00::/7
 EOF
-  # .invalid keeps squid's config valid for an IP-only policy (RFC 2606).
-  printf 'acl egress_hosts dstdomain -n %s\n' "${EGRESS_HOSTS[*]:-.invalid}"
-  [ "${#EGRESS_DSTS[@]}" -gt 0 ] && printf 'acl egress_dsts dst %s\n' "${EGRESS_DSTS[*]}"
+  printf 'acl egress_model_endpoint dstdomain -n %s\n' "$egress_api_host"
+  printf 'acl egress_model_providers dstdomain -n %s\n' "$EGRESS_MODEL_PROVIDERS"
   cat <<'EOF'
 
 http_access deny egress_metadata_names
 http_access deny !egress_ports
 http_access deny CONNECT !egress_tls_port
-http_access deny !egress_hosts !egress_ip_literal
 http_access deny egress_linklocal
 http_access deny egress_loopback
-EOF
-  [ "${#EGRESS_DSTS[@]}" -gt 0 ] && echo 'http_access allow egress_dsts'
-  cat <<'EOF'
-http_access deny egress_private
-http_access allow egress_hosts
-http_access deny all
+http_access allow egress_model_endpoint
+http_access deny egress_model_providers
+http_access allow all
 EOF
 }
 
-# End-of-session summary of what the proxy refused, so the user learns which
-# host to add without reading logs. Called from the EXIT trap; without
-# --api there is no sidecar and `logs` fails into `|| true`. It
-# parses squid's default access-log format on the sidecar's stdout: field 4 is
-# the result/status, field 7 the URL (host:port for CONNECT).
-egress_report_denied() {
-  local denied
-  denied=$("$RUNTIME" logs "$EGRESS_SIDECAR" 2>/dev/null \
-    | awk '$4 ~ /^TCP_DENIED\// {print $7}' \
+# Save the proxy's access log, the session's evidence, to the host before the
+# sidecar is removed, and summarise what it refused. Called from the EXIT
+# trap; it does nothing unless the sidecar was started (egress_started set).
+# The log dir is never mounted into the agent container. squid's default
+# format on stdout: field 4 is the result/status, field 7 the URL (host:port
+# for CONNECT). egress_report.py reads the same format.
+# ponytail: a SIGKILLed run.sh never runs the trap and loses the session log;
+# bind-mount squid's access_log to the host if that matters.
+egress_save_log() {
+  [ -n "${egress_started:-}" ] || return 0
+  local base="$EGRESS_LOG_DIR/$egress_started-$gh_sid" denied
+  mkdir -p "$EGRESS_LOG_DIR" || return 0
+  "$RUNTIME" logs "$EGRESS_SIDECAR" >"$base.log" 2>/dev/null || true
+  printf 'start=%s\nend=%s\nuser=%s\nhost=%s\nworkspace=%s\nimage=%s\nimage_id=%s\nendpoint=%s\n' \
+    "$egress_started" "$(date -u +%Y%m%dT%H%M%SZ)" "$(id -un)" "$(uname -n)" \
+    "${WORKSPACES[*]}" "$IMAGE" "$egress_image_id" "$egress_api_host" >"$base.meta"
+  denied=$(awk '$4 ~ /^TCP_DENIED\// {print $7}' "$base.log" \
     | sed -e 's#^[A-Za-z]*://##' -e 's#[/:].*##' | sort -u | tr '\n' ' ') || true
-  [ -n "$denied" ] && echo "claude-docker: egress policy blocked: ${denied}— add them to CLAUDE_DOCKER_EGRESS_POLICY (${CLAUDE_DOCKER_EGRESS_POLICY:-unset}) to permit them" >&2
+  [ -n "$denied" ] && echo "claude-docker: egress proxy blocked: ${denied}" >&2
+  echo "claude-docker: egress log saved to $base.log — build the audit PDF with: claude-docker --report" >&2
   return 0
 }
 
@@ -821,12 +793,12 @@ EGRESS_SIDECAR="claude-egress-proxy-$gh_sid"
 # not-yet-existing resources (`|| true`): trap-before-create closes the
 # window where a failure between creating a resource and re-trapping would
 # leak it, so this must be in place before the network/sidecar are created.
-# Egress teardown order matters: the denied-host summary reads the proxy's
-# logs, so it runs before the proxy is removed. The egress networks are
+# Egress teardown order matters: egress_save_log reads the proxy's logs,
+# so it runs before the proxy is removed. The egress networks are
 # removed last, because the gh sidecar may be attached to the internal one.
 trap '
 case "$stage" in "$HOME/.cache/claude-docker/host."*) rm -rf "$stage" ;; esac
-egress_report_denied
+egress_save_log
 "$RUNTIME" rm -f "$EGRESS_SIDECAR" >/dev/null 2>&1 || true
 "$RUNTIME" rm -f "$GH_PROXY_SIDECAR" >/dev/null 2>&1 || true
 "$RUNTIME" network rm "$GH_PROXY_NETWORK" >/dev/null 2>&1 || true
@@ -1012,10 +984,7 @@ if [ "$WITH_API" = "1" ]; then
   EGRESS_SIDECAR_ARGS=()
   if [ "$GH_SIDECAR_ACTIVE" = "1" ]; then
     # squid's hosts_file is /etc/hosts, so CONNECT github.com:443 lands on
-    # the gh sidecar, which still terminates TLS and injects the token. Its
-    # /32 is exempt from the private-range deny. It is added after
-    # validation, from `inspect`, not user input.
-    EGRESS_DSTS+=("$gh_proxy_ip/32")
+    # the gh sidecar, which still terminates TLS and injects the token.
     EGRESS_SIDECAR_ARGS+=(
       "--add-host" "github.com:$gh_proxy_ip"
       "--add-host" "api.github.com:$gh_proxy_ip"
@@ -1023,6 +992,8 @@ if [ "$WITH_API" = "1" ]; then
     )
   fi
   gen_egress_squid_conf >"$stage/egress-squid.conf"
+  egress_image_id=$("$RUNTIME" image inspect --format '{{.Id}}' "$IMAGE" 2>/dev/null || echo unknown)
+  egress_started=$(date -u +%Y%m%dT%H%M%SZ)
 
   # Runs as squid's own unprivileged user with no capabilities: port 3128
   # needs none, and the proxy holds no secret.
@@ -1070,8 +1041,11 @@ if [ "$WITH_API" = "1" ]; then
     "-e" "http_proxy=$egress_url" "-e" "https_proxy=$egress_url"
     "-e" "HTTP_PROXY=$egress_url" "-e" "HTTPS_PROXY=$egress_url"
     "-e" "no_proxy=localhost,127.0.0.1,::1" "-e" "NO_PROXY=localhost,127.0.0.1,::1"
+    # Telemetry, error reports and the updater: Anthropic hosts the proxy
+    # refuses anyway. Off, so they don't fill the log with denied requests.
+    "-e" "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"
   )
-  echo "claude-docker: egress proxy '$EGRESS_SIDECAR' is active; allowed: ${EGRESS_HOSTS[*]} ${EGRESS_DSTS[*]-}" >&2
+  echo "claude-docker: egress proxy '$EGRESS_SIDECAR' is active; model traffic goes only to $egress_api_host, every connection is logged to $EGRESS_LOG_DIR" >&2
 fi
 
 for item in agents commands skills; do

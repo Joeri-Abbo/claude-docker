@@ -572,8 +572,8 @@ check_entrypoint_reached() {
 # The proxy-unaware probes are the load-bearing ones. A proxy-aware client
 # failing to reach a blocked host only proves the proxy is configured. It says
 # nothing about whether a raw socket can walk around it, and the --internal
-# network exists to stop exactly that. smoke/egress.sh's egress-policy.yaml
-# lists example.com (also the fake gateway) and localhost, nothing else.
+# network exists to stop exactly that. smoke/egress.sh's fake gateway is
+# example.com; any other non-provider host (example.org) must stay reachable.
 
 # HTTP status for $2 via curl; $1 is the -w variable. Prints 000 on failure.
 egress_code() {
@@ -589,13 +589,19 @@ check_egress() {
     fail "egress-env: https_proxy/HTTPS_PROXY missing or inconsistent"
   fi
 
-  assert_eq "egress-allowed: https://example.com via proxy" \
+  assert_eq "egress-endpoint: the model endpoint (example.com) via proxy" \
     "$(egress_code http_code https://example.com/)" "200"
-  assert_eq "egress-denied: CONNECT example.org refused by proxy" \
-    "$(egress_code http_connect https://example.org/)" "403"
-  # Nothing is implied under --api, not even Anthropic's own API.
-  assert_eq "egress-implicit: CONNECT api.anthropic.com refused by proxy" \
+  assert_eq "egress-open: a non-model host (example.org) via proxy" \
+    "$(egress_code http_code https://example.org/)" "200"
+  assert_eq "egress-provider: CONNECT api.anthropic.com refused by proxy" \
     "$(egress_code http_connect https://api.anthropic.com/)" "403"
+  assert_eq "egress-provider: CONNECT claude.ai refused by proxy" \
+    "$(egress_code http_connect https://claude.ai/)" "403"
+  if [ "${CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC:-}" = "1" ]; then
+    pass "egress-telemetry: CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"
+  else
+    fail "egress-telemetry: CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC not set"
+  fi
 
   # No route: a public IP, without the proxy.
   if curl -s -o /dev/null -m 10 --noproxy '*' http://1.1.1.1/ 2>/dev/null; then
@@ -609,14 +615,12 @@ check_egress() {
     pass "egress-dns: external names do not resolve inside the agent container"
   fi
 
-  # Denies above the allowlist. no_proxy is cleared for the localhost probe so
-  # curl sends it to the proxy (where 'localhost' is allowlisted by name but
-  # resolves to loopback) instead of dialling the agent's own loopback.
+  # Denies above the allows. no_proxy is cleared for the localhost probe so
+  # curl sends it to the proxy (where 'localhost' resolves to the proxy's own
+  # loopback) instead of dialling the agent's own loopback.
   assert_eq "egress-metadata: 169.254.169.254 refused by proxy" \
     "$(egress_code http_code http://169.254.169.254/latest/meta-data/)" "403"
-  assert_eq "egress-private: 10.0.0.1 refused by proxy" \
-    "$(egress_code http_code http://10.0.0.1/)" "403"
-  assert_eq "egress-rebinding: allowlisted name resolving to loopback refused" \
+  assert_eq "egress-loopback: a name resolving to the proxy's loopback refused" \
     "$(no_proxy='' NO_PROXY='' egress_code http_code http://localhost/)" "403"
   assert_eq "egress-port: CONNECT to a non-443 port refused" \
     "$(egress_code http_connect https://example.com:8443/)" "403"
