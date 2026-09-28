@@ -42,7 +42,7 @@ Host credentials (files or env vars) SHALL NOT reach the container unless the us
   distinguishes it from proxied `gh`.
 - `--glab`: mount the platform-appropriate glab config dir — `~/Library/Application Support/glab-cli` on macOS, `~/.config/glab-cli` on Linux — at `/root/.config/glab-cli:ro`; forward `GITLAB_TOKEN` when set on the host.
 - `--tfe`: when present on the host, mount `~/.terraform.d/credentials.tfrc.json` at `/root/.terraform.d/credentials.tfrc.json:ro`; forward `TF_TOKEN_app_terraform_io` when set on the host. Targets `app.terraform.io` (HCP Terraform); self-hosted Terraform Enterprise hostnames and other `TF_TOKEN_<host>` variables are out of scope for this opt-in.
-- `--az`: forward `AZURE_DEVOPS_EXT_PAT` and `AZURE_DEVOPS_ORG_URL` when set on the host, and SHALL NOT mount any host `~/.azure` file: the PAT is the whole credential, and the profile would only carry tenant / subscription IDs and the account name into the container. `AZURE_DEVOPS_ORG_URL` SHALL be the only source of the Azure DevOps hostname — nothing SHALL assume `dev.azure.com`, so Azure DevOps Server (on-prem, custom hostname) works the same as Services. `run.sh` SHALL NOT attempt host-side PAT discovery (`az` has no command that prints a usable PAT). When `REQUESTS_CA_BUNDLE` is set on the host, `run.sh` SHALL mount the file it names read-only at `/usr/local/share/ca-certificates/claude-docker-az.crt`, the entrypoint SHALL install it into the system trust store before the privilege drop, and `az` SHALL use the system bundle; the host value itself SHALL NOT be forwarded. When it is set but does not name a file, `run.sh` SHALL exit 1 before starting any container. Targets the `azure-devops` extension only; general Azure resource management and its credentials (`ARM_*`, `AZURE_CLIENT_SECRET`, service principals) are out of scope for this opt-in.
+- `--az`: forward `AZURE_DEVOPS_EXT_PAT` and `AZURE_DEVOPS_ORG_URL` when set on the host, and SHALL NOT mount any host `~/.azure` file: the PAT is the whole credential, and the profile would only carry tenant / subscription IDs and the account name into the container. `AZURE_DEVOPS_ORG_URL` SHALL be the only source of the Azure DevOps hostname — nothing SHALL assume `dev.azure.com`, so Azure DevOps Server (on-prem, custom hostname) works the same as Services. `run.sh` SHALL NOT attempt host-side PAT discovery (`az` has no command that prints a usable PAT). When `CLAUDE_DOCKER_AZ_CA` is set on the host, `run.sh` SHALL mount the file it names read-only at `/usr/local/share/ca-certificates/claude-docker-az.crt`, the entrypoint SHALL install it into the system trust store before the privilege drop, and `az` SHALL use the system bundle; the host value itself SHALL NOT be forwarded. When it is set but does not name a file, `run.sh` SHALL exit 1 before starting any container. The host's `REQUESTS_CA_BUNDLE` SHALL NOT be read, since it is often set for unrelated reasons. The certificate is trusted for every TLS connection in the container, not only the Azure DevOps Server; the documentation SHALL say so. Targets the `azure-devops` extension only; general Azure resource management and its credentials (`ARM_*`, `AZURE_CLIENT_SECRET`, service principals) are out of scope for this opt-in.
 
 All credential bind-mounts SHALL be read-only so a compromised container cannot rewrite host config or tokens. `~/.aws/credentials` and `~/.aws/cli/cache/` SHALL NEVER be mounted, even under `--aws`. Likewise nothing under `~/.azure/` SHALL be mounted under `--az` — in particular never the Azure token caches `msal_token_cache.json` or `accessTokens.json`.
 
@@ -155,14 +155,20 @@ copied in from the host or derived inside the container.
 
 #### Scenario: --az trusts the host REQUESTS_CA_BUNDLE
 
-- **GIVEN** the host exports `REQUESTS_CA_BUNDLE=~/.azure/tfs-ca.pem` naming a PEM CA certificate
+- **GIVEN** the host exports `CLAUDE_DOCKER_AZ_CA=~/.azure/tfs-ca.pem` naming a PEM CA certificate
 - **WHEN** user runs `claude-docker --az ~/repo`
 - **THEN** the certificate is present in `/etc/ssl/certs/ca-certificates.crt` inside the container
 - **AND** `az` resolves `REQUESTS_CA_BUNDLE` to `/etc/ssl/certs/ca-certificates.crt`, not the host path
 
+#### Scenario: --az ignores the host REQUESTS_CA_BUNDLE
+
+- **GIVEN** the host exports `REQUESTS_CA_BUNDLE` naming a PEM file and does not set `CLAUDE_DOCKER_AZ_CA`
+- **WHEN** user runs `claude-docker --az ~/repo`
+- **THEN** no file is mounted at `/usr/local/share/ca-certificates/claude-docker-az.crt`
+
 #### Scenario: --az with a missing REQUESTS_CA_BUNDLE fails loudly
 
-- **GIVEN** the host exports `REQUESTS_CA_BUNDLE=/nonexistent.pem`
+- **GIVEN** the host exports `CLAUDE_DOCKER_AZ_CA=/nonexistent.pem`
 - **WHEN** user runs `claude-docker --az ~/repo`
 - **THEN** `run.sh` exits 1 with an error naming the path and starts no container
 

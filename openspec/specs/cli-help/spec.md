@@ -35,12 +35,13 @@ The help output SHALL include a one-line description for each of the following, 
 - The `CLAUDE_DOCKER_TMUX` environment variable and its accepted values (`1`, `cc`).
 - The `CLAUDE_DOCKER_CONFIG_DIR` environment variable and its relationship to `--claude-dir`.
 - The `CLAUDE_DOCKER_API_CA` environment variable and its relationship to `--api`.
+- The `CLAUDE_DOCKER_AZ_CA` environment variable and its relationship to `--az`.
 - A brief note that `settings.docker.json` is mounted as `settings.json` in the container.
 
 #### Scenario: All wrapper flags documented
 
 - **WHEN** user runs `claude-docker --help`
-- **THEN** the output contains each of `--yolo`, `--ephemeral`, `--ro`, `--aws`, `--gh`, `--glab`, `--api`, `--az`, `--iterm`, `--tmux`, `--claude-dir`, `-h`, `--help`, `--`, `CLAUDE_DOCKER_TMUX`, `CLAUDE_DOCKER_CONFIG_DIR`, `CLAUDE_DOCKER_API_CA`, and `settings.docker.json`
+- **THEN** the output contains each of `--yolo`, `--ephemeral`, `--ro`, `--aws`, `--gh`, `--glab`, `--api`, `--az`, `--iterm`, `--tmux`, `--claude-dir`, `-h`, `--help`, `--`, `CLAUDE_DOCKER_TMUX`, `CLAUDE_DOCKER_CONFIG_DIR`, `CLAUDE_DOCKER_API_CA`, `CLAUDE_DOCKER_AZ_CA`, and `settings.docker.json`
 
 #### Scenario: Each wrapper flag has an explanation
 

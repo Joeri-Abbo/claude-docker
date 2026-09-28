@@ -74,9 +74,7 @@ Wrapper flags:
                       set; unmask in-container ~/.azure state. Mounts no
                       host ~/.azure file (no profile, no token caches). Covers
                       az devops / repos / boards / pipelines only.
-                      REQUESTS_CA_BUNDLE (a host PEM, e.g. an on-prem
-                      Server's CA) is installed into the container's trust
-                      store.
+                      Optional private CA via CLAUDE_DOCKER_AZ_CA.
   --registry          Opt in to private package registries: surface host-
                       native uv/npm/pnpm/pip config so in-container installs
                       resolve against a private feed. Mounts ~/.npmrc,
@@ -129,6 +127,9 @@ Environment:
   CLAUDE_DOCKER_API_CA     Path to a PEM CA certificate for the --api endpoint;
                            installed into the container's trust store. Ignored
                            without --api.
+  CLAUDE_DOCKER_AZ_CA      Path to a PEM CA certificate for an on-prem Azure
+                           DevOps Server; installed into the container's trust
+                           store, so trusted for all TLS. Ignored without --az.
 
 Credentials are off by default; combine opt-ins as needed:
   claude-docker --aws --gh ~/repo
@@ -205,12 +206,13 @@ if [ "$WITH_API" = "1" ] && [ -z "${ANTHROPIC_AUTH_TOKEN:-}" ] && [ -z "${ANTHRO
   exit 1
 fi
 
-# --az private CA: REQUESTS_CA_BUNDLE is what az (python requests) reads on the
-# host, e.g. for an on-prem Azure DevOps Server. Its value is a host path, so it
-# is mounted and installed below rather than forwarded. A set-but-missing path
-# is fatal: skipping it would fail later at the first TLS handshake.
-if [ "$WITH_AZ" = "1" ] && [ -n "${REQUESTS_CA_BUNDLE:-}" ] && [ ! -f "$REQUESTS_CA_BUNDLE" ]; then
-  echo "claude-docker: REQUESTS_CA_BUNDLE '$REQUESTS_CA_BUNDLE' is not a file" >&2
+# --az private CA, e.g. for an on-prem Azure DevOps Server. Its own variable, not
+# the host's REQUESTS_CA_BUNDLE, since that is often set for unrelated reasons
+# and this CA ends up trusted for all TLS in the container. It is mounted and
+# installed below rather than forwarded. A set-but-missing path is fatal:
+# skipping it would fail later at the first TLS handshake.
+if [ "$WITH_AZ" = "1" ] && [ -n "${CLAUDE_DOCKER_AZ_CA:-}" ] && [ ! -f "$CLAUDE_DOCKER_AZ_CA" ]; then
+  echo "claude-docker: CLAUDE_DOCKER_AZ_CA '$CLAUDE_DOCKER_AZ_CA' is not a file" >&2
   exit 1
 fi
 
@@ -458,7 +460,7 @@ fi
 if [ "$WITH_AZ" = "1" ]; then
   # Installed by the entrypoint's update-ca-certificates step (claude-docker-*.crt),
   # so git/curl trust it too; the az wrapper points requests at the system bundle.
-  [ -n "${REQUESTS_CA_BUNDLE:-}" ] && MOUNT_ARGS+=("-v" "$(hostpath "$REQUESTS_CA_BUNDLE"):/usr/local/share/ca-certificates/claude-docker-az.crt:ro")
+  [ -n "${CLAUDE_DOCKER_AZ_CA:-}" ] && MOUNT_ARGS+=("-v" "$(hostpath "$CLAUDE_DOCKER_AZ_CA"):/usr/local/share/ca-certificates/claude-docker-az.crt:ro")
 fi
 
 # Private package registries: surface the host's native uv/npm/pnpm/pip registry
