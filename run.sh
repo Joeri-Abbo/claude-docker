@@ -803,6 +803,21 @@ while [ "$i" -lt "$n" ]; do
 	useRelativePaths = true
 EOF
     MOUNT_ARGS+=("-v" "$(hostpath "$stage/git-config-$ws_name"):/workspaces/$ws_name/.git/config")
+    # .git/hooks is read-only in the container: hooks run on the host at the
+    # next host-side git command, so a container write there is host code
+    # execution. Existing hooks still run in-container. An absent dir is
+    # created host-side first (a docker-created mountpoint would be root-owned
+    # on Linux). A symlink is refused: the engine resolves a mount destination
+    # through it, leaving the link itself replaceable from inside. Residual,
+    # not covered: a core.hooksPath pointing inside the worktree (e.g. husky's
+    # .husky/_) stays writable.
+    hooks="$ws_abs/.git/hooks"
+    [ -e "$hooks" ] || [ -L "$hooks" ] || mkdir "$hooks"
+    if [ -L "$hooks" ] || [ ! -d "$hooks" ]; then
+      echo "claude-docker: '$hooks' is a symlink or not a directory, so it can't be mounted read-only — make it a plain directory (or use core.hooksPath)" >&2
+      exit 1
+    fi
+    MOUNT_ARGS+=("-v" "$(hostpath "$hooks"):/workspaces/$ws_name/.git/hooks:ro")
   fi
   i=$((i + 1))
 done
