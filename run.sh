@@ -791,7 +791,11 @@ while [ "$i" -lt "$n" ]; do
   # Skip workspaces where .git is a worktree/submodule pointer file rather
   # than a directory — only the main repo's .git/config needs the overlay,
   # and the worktree resolves through the main repo's mount anyway.
-  if [ -f "$ws_abs/.git/config" ]; then
+  # Symlinks are refused at both levels: the workspace is writable from the
+  # container, and [ -f ] / cp follow links, so a planted .git or .git/config
+  # link would copy an arbitrary host file into the container.
+  if [ -d "$ws_abs/.git" ] && [ ! -L "$ws_abs/.git" ] \
+     && [ -f "$ws_abs/.git/config" ] && [ ! -L "$ws_abs/.git/config" ]; then
     cp "$ws_abs/.git/config" "$stage/git-config-$ws_name"
     cat >>"$stage/git-config-$ws_name" <<'EOF'
 
