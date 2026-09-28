@@ -21,7 +21,7 @@
 #        api.github.com with the injected Bearer header (no -k — proves CA
 #        trust), gh's Go resolver honours --add-host, git's smart-HTTP request
 #        reaches the mock with the injected Basic header.
-#   4.3  default policy blocks DELETE /repos/{o}/{r} (403 + policy body, never
+#   4.3  default policy blocks DELETE /repos/{o}/{r} and /repositories/{id} (403 + policy body, never
 #        reaches the mock); benign requests pass; a CLAUDE_DOCKER_GH_POLICY
 #        extension is enforced.
 #   4.4  sidecar audit log has structured method/path/status entries, never
@@ -494,6 +494,14 @@ run_main_checks() {
   fi
   rm -f /tmp/gh_delete_body.$$
 
+  delete_code=$(curl -sS --max-time 10 -o /tmp/gh_delete_body.$$ -w '%{http_code}' -X DELETE https://api.github.com/repositories/123 2>/dev/null)
+  if [ "$delete_code" = "403" ] && grep -q "claude-docker gh-proxy policy" /tmp/gh_delete_body.$$; then
+    pass "4.3 default policy blocks DELETE /repositories/123 (403, policy body present)"
+  else
+    fail "4.3 default policy did not block DELETE /repositories/123 as expected (code=$delete_code body=$(cat /tmp/gh_delete_body.$$ 2>/dev/null))"
+  fi
+  rm -f /tmp/gh_delete_body.$$
+
   if [ "$POLICY_EXT" = "1" ]; then
     local refs_code
     refs_code=$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' -X DELETE https://api.github.com/repos/o/r/git/refs/heads/foo 2>/dev/null)
@@ -751,6 +759,11 @@ if [ -f "$SCRATCH/mock-phase1.log" ]; then
     record_pass "4.3 benign GET /repos/o/r arrived at the mock upstream"
   else
     record_fail "4.3 benign GET /repos/o/r never arrived at the mock upstream"
+  fi
+  if grep -qF '"uri":"/repositories/123"' "$SCRATCH/mock-phase1.log"; then
+    record_fail "4.3 default-policy DELETE /repositories/123 reached the mock upstream (should have been blocked at the sidecar)"
+  else
+    record_pass "4.3 default-policy DELETE /repositories/123 never reached the mock upstream"
   fi
   refs_mock_lines=$(grep -F '"uri":"/repos/o/r/git/refs/heads/foo"' "$SCRATCH/mock-phase1.log" 2>/dev/null || true)
   if [ -n "$refs_mock_lines" ]; then
