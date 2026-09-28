@@ -54,7 +54,9 @@ the [threat model](README.md#threat-model) before reporting:
 - **Opted-in credentials are readable in-session.** That is what the flag does;
   the container is a blast-radius reduction, not a secret boundary.
 - **State persists across sessions** in the `claude-code-root` and
-  `claude-code-home` named volumes unless `--ephemeral` is passed.
+  `claude-code-home` named volumes unless `--ephemeral` is passed — including
+  config a session plants for later sessions to execute (see the [threat
+  model](README.md#threat-model)).
 - **`--yolo` / `--dangerously-skip-permissions` is a deliberate mode**, not a
   misconfiguration.
 - **The container is not a full sandbox.** It narrows blast radius compared with

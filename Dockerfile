@@ -332,7 +332,9 @@ ENV GOBIN=/root/go/bin \
 # both live in the persistent claude-code-root volume and are writable by the
 # session, so a binary one session drops there must never be able to shadow a
 # system binary (git, gh, aws, …) on a later run. Tools installed into either
-# stay runnable by name; only deliberate overrides are given up.
+# stay runnable by name; only deliberate overrides are given up. This covers
+# binary shadowing only — rc/config files on the same volume still carry a
+# compromise into later sessions (README "Threat model").
 ENV CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 \
     DISABLE_AUTOUPDATER=1 \
     IS_SANDBOX=1 \
