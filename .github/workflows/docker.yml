@@ -61,7 +61,7 @@ jobs:
       # .hadolint.yaml, .dockleignore and .grype.yaml. Tagging is
       # metadata-action's defaults with latest=false, so a v0.1.0 tag publishes
       # :v0.1.0 and nothing else.
-      - uses: schubergphilis/mcvs-docker-action@ed30e5db799a279ec1062bc3ff237462c7ae797e # v0.12.0
+      - uses: schubergphilis/mcvs-docker-action@e2dd2c7de4d02535bf8500dc7d1a84639af86880 # v0.13.0
         with:
           images: ghcr.io/${{ github.repository }}
           platforms: linux/amd64,linux/arm64
@@ -72,4 +72,9 @@ jobs:
           # exhaustive set: the base image's own tokens (Canonical's
           # rockcraft/umoci build) plus this Dockerfile's.
           dockle-accept-key: --clear,org.opencontainers.image.created,org.opencontainers.image.description,org.opencontainers.image.title,org.opencontainers.image.version,PATH,--chmod,--strip-components,ARCH,CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS,DISABLE_AUTOUPDATER,GOBIN,GOPATH,GOROOT,GO_SHA256_AMD64,GO_SHA256_ARM64,GO_VERSION,IS_SANDBOX,LANG,LC_ALL,NODE_VERSION,SHA,TASK_VERSION,URL,magic,nodejs,task,owner,whl,UV_PYTHON_INSTALL_DIR,azure-cli-core,AZURE_DEVOPS_EXT__DEFAULTS_ORGANIZATION,AZURE_EXTENSION_DIR,AZURE_CONFIG_DIR,REQUESTS_CA_BUNDLE,AZURE_CORE_COLLECT_TELEMETRY
+          # CIS-DI-0010 also flags a hard-coded list of file names, which
+          # accept-key cannot suppress. azure-core ships azure/core/settings.py
+          # under /opt/az. Dockle matches the name, not the path, so settings.py
+          # is accepted anywhere in the image.
+          dockle-accept-file: settings.py
           token: ${{ secrets.GITHUB_TOKEN }}
