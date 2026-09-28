@@ -19,9 +19,9 @@ modify any manual pin; it reports them exactly as an operator run does.
 
 The pull request SHALL be opened such that the repository's own pull-request
 checks run on it, since the pin bump it proposes is validated by building the
-image, not by reading the diff. Where the available credential cannot trigger
-those checks, that limitation SHALL be documented at the point of configuration,
-including its effect on mergeability.
+image, not by reading the diff. Where the platform holds those checks for a
+maintainer's approval, as it does for a pull request opened with the job's own
+token, that step SHALL be documented at the point of configuration.
 
 #### Scenario: changed pins are proposed as a pull request
 
