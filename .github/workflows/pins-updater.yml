@@ -50,6 +50,22 @@ jobs:
           # job's GITHUB_TOKEN (see the PR step).
           persist-credentials: false
 
+      # update_pins.py shells out to `uv pip compile` to write
+      # pins/az-requirements.txt, and ubuntu-24.04 ships no uv. Install the
+      # version the image pins, verified against the pinned sha256.
+      - name: Read the uv pin
+        id: uv-pin
+        run: |
+          set -euo pipefail
+          . pins/uv.env
+          echo "version=$UV_VERSION" >> "$GITHUB_OUTPUT"
+          echo "sha256=$UV_SHA256_X86_64" >> "$GITHUB_OUTPUT"
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: ${{ steps.uv-pin.outputs.version }}
+          checksum: ${{ steps.uv-pin.outputs.sha256 }}
+          enable-cache: false
+
       - name: Refresh pins
         id: refresh
         env:
@@ -74,7 +90,8 @@ jobs:
           # python3, not `uv run`: update_pins.py is stdlib-only
           # (`dependencies = []`) and the runner's python3.12 already satisfies
           # its `requires-python = ">=3.11"`, so uv would have nothing to
-          # resolve — this is the same invocation ci.yml uses. README documents
+          # resolve — this is the same invocation ci.yml uses (uv is still on
+          # PATH, from setup-uv above, for the az lock). README documents
           # `uv run` for operators because the image ships uv.
           # tee so the report lands both in the job log and in the PR body.
           # A non-zero exit from update_pins.py fails the job (pipefail); it

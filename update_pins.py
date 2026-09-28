@@ -17,7 +17,7 @@ into the *selection* — the resulting image is safe to use the moment it is bui
 The pins/ fragments are the Dockerfile's source of truth: it COPYs + sources
 them. For az it also writes pins/az-requirements.txt: azure-cli-core and every
 transitive dep, hash-locked with `uv pip compile` (uv is on PATH whenever this
-runs via `uv run`). Nothing here ever edits the Dockerfile. nodejs and the base-image digest
+runs via `uv run`; pins-updater.yml installs it with setup-uv). Nothing here ever edits the Dockerfile. nodejs and the base-image digest
 stay manual on purpose and are surfaced as reminders.
 
 Usage:
