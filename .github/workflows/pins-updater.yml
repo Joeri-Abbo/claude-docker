@@ -45,9 +45,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # No persisted credentials: the push below authenticates explicitly
-          # with the token it wants to use, which may be a PAT rather than the
-          # job's GITHUB_TOKEN (see the PR step).
+          # No persisted credentials: only the push below needs write access,
+          # and it authenticates explicitly.
           persist-credentials: false
 
       - name: Refresh pins
@@ -98,18 +97,10 @@ jobs:
       - name: Open or update the pull request
         if: steps.diff.outputs.changed == 'true'
         env:
-          # PINS_UPDATER_TOKEN (a fine-grained PAT or GitHub App token scoped
-          # to this repo with contents:write + pull-requests:write) is what you
-          # want here. A PR opened with the default GITHUB_TOKEN does not
-          # trigger `pull_request` workflows, so CI — the docker build and the
-          # smoke matrix that actually validate a pin bump — never runs on it;
-          # and because the `main protection` ruleset requires the `Validate`
-          # and `Docker build (validate, no push)` contexts, those stay stuck
-          # on "expected — waiting for status to be reported" and the PR cannot
-          # be merged at all. The fallback below keeps the job working without
-          # the secret, but every weekly PR then needs a human to push an empty
-          # commit or close/reopen it before it can merge.
-          GH_TOKEN: ${{ secrets.PINS_UPDATER_TOKEN || secrets.GITHUB_TOKEN }}
+          # GitHub holds `pull_request` runs on a PR opened with GITHUB_TOKEN
+          # until a maintainer clicks "Approve and run" on the PR. That keeps a
+          # human in the loop for the bump with no long-lived PAT to manage.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Resolve the repo explicitly rather than from the git remote.
           GH_REPO: ${{ github.repository }}
           CMD: ${{ steps.refresh.outputs.cmd }}

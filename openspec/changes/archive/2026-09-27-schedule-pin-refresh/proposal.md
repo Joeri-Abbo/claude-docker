@@ -24,12 +24,10 @@ rather than riding along uncovered.
 - One long-lived branch and one PR, replaced each run, rather than a dated
   branch per run: a stale pins PR proposes versions the next refresh has already
   superseded.
-- Open the PR with `PINS_UPDATER_TOKEN` when that secret exists, falling back to
-  `GITHUB_TOKEN`. The fallback is documented as degraded rather than equivalent:
-  GitHub does not fire `pull_request` workflows for a PR opened with
-  `GITHUB_TOKEN`, and `main`'s ruleset requires two contexts that then never
-  report, so the PR cannot be merged until a human nudges it.
-- Document both the workflow and the secret in README's "Updating pinned tool
+- Open the PR with the job's `GITHUB_TOKEN`. GitHub holds the PR's
+  `pull_request` runs until a maintainer clicks _Approve and run_, which puts a
+  human in front of every bump without a long-lived PAT.
+- Document the workflow and the approval step in README's "Updating pinned tool
   versions" section.
 
 Not in scope: acting on the manual pins (`nodejs`, `task`, `go`, the base-image
@@ -56,13 +54,11 @@ None.
 
 - `.github/workflows/pins-updater.yml` — new file, the whole of the behaviour.
 - `README.md` — the refresh section gains the unattended path and the
-  `PINS_UPDATER_TOKEN` caveat.
+  _Approve and run_ step.
 - No change to `update_pins.py`, the Dockerfile, the built image, or anything at
   runtime. The workflow is a caller of the existing script, not a change to it.
-- Operational prerequisite, not code: `PINS_UPDATER_TOKEN` must exist as a repo
-  secret (fine-grained PAT scoped to this repo, `contents: write` +
-  `pull requests: write`) for the weekly PR to be mergeable without manual
-  intervention.
+- Operational step, not code: a maintainer approves the workflow runs on each
+  weekly PR before CI reports.
 
 ## Sequencing
 

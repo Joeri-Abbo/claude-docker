@@ -70,22 +70,19 @@ satisfies `requires-python`, and `ci.yml` already calls the script this way. So
 the workflow calls `python3` directly and the workflow has no install step at
 all.
 
-### `PINS_UPDATER_TOKEN`, with a documented-as-degraded fallback
+### `GITHUB_TOKEN`, with CI gated on approval
 
-GitHub does not fire `pull_request` workflows for a PR opened with the job's
-`GITHUB_TOKEN`. Combined with `main protection`'s required contexts, that is not
-a cosmetic gap: the required checks never report, so the PR sits on "expected —
-waiting for status to be reported" and cannot be merged until a human pushes an
-empty commit or closes and reopens it. The workflow therefore prefers
-`secrets.PINS_UPDATER_TOKEN` — a fine-grained PAT scoped to this repo with
-`contents: write` + `pull requests: write`, rather than a classic PAT with full
-`repo` — and falls back to `GITHUB_TOKEN` so the job still works without it.
-Both the workflow comment and README state the fallback's real consequence
-("can't be merged until") rather than the softer "CI won't run".
+The PR is opened with the job's `GITHUB_TOKEN`. GitHub still creates the PR's
+`pull_request` runs, but holds them until a maintainer clicks _Approve and run_.
+This was confirmed on the scheduled PRs of 2026-08-31, 2026-09-07 and #70. That
+is enough: a human reviews every bump anyway, and approving CI is part of that
+review. A fine-grained PAT (`PINS_UPDATER_TOKEN`) would skip the click, but it
+adds a long-lived secret to rotate and guard for no real gain, so it was
+dropped.
 
-Because the token may be a PAT rather than the job token, `checkout` runs with
-`persist-credentials: false` and the push names its remote URL explicitly, so
-there is no ambient credential to accidentally authenticate as the wrong actor.
+`checkout` runs with `persist-credentials: false`, and the push names its
+remote URL explicitly, so the only write credential in use is the one the push
+step passes.
 
 ### Dispatch inputs reach the script through `env`
 
@@ -105,10 +102,9 @@ same file stays relative, because that one *is* rendered from a repo file.
 
 ## Risks / Trade-offs
 
-- **The secret is a prerequisite, not an optimization.** Merging the workflow
-  before `PINS_UPDATER_TOKEN` exists yields a weekly PR that no one can merge
-  without manual intervention. Mitigation is procedural: create the secret
-  first.
+- **An unapproved PR sits idle.** If no one approves its runs, the required
+  checks never report and the PR can't merge (#67 closed that way). This is
+  acceptable: the next Monday's run replaces it.
 - **`concurrency: pins-updater` with `cancel-in-progress: false`.** Two runs
   force-pushing the same branch would race; cancelling a run mid-push could
   leave the branch and the PR body describing different resolutions. Serializing
