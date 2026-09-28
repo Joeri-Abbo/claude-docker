@@ -37,3 +37,10 @@ ignore:
       version: 48.0.1
       location: /opt/az/**
     reason: Held by azure-cli-core's msal pin; moves with pins/az.env.
+  # The same pin as the action's second scan (the repo checkout) sees it: the
+  # hash-locked requirements file the Dockerfile installs /opt/az from.
+  - package:
+      name: cryptography
+      version: 48.0.1
+      location: "**/pins/az-requirements.txt"
+    reason: Held by azure-cli-core's msal pin; moves with pins/az.env.
