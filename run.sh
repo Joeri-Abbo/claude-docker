@@ -313,9 +313,11 @@ api.github.com {
 		format json
 	}
 
+	# Both routes GitHub serves a repo on: /repos/{owner}/{repo} and the
+	# numeric-id alias /repositories/{id} (the form its Link headers use).
 	@gh_proxy_repo_delete {
 		method DELETE
-		path_regexp ^/repos/[^/]+/[^/]+/?$
+		path_regexp ^/(repos/[^/]+/[^/]+|repositories/[0-9]+)/?$
 	}
 	respond @gh_proxy_repo_delete "claude-docker gh-proxy policy: repository deletion is blocked by default. Extend policy via CLAUDE_DOCKER_GH_POLICY, or bypass the proxy entirely with --gh-direct." 403
 	import /etc/caddy/policy.caddy
@@ -791,7 +793,11 @@ while [ "$i" -lt "$n" ]; do
   # Skip workspaces where .git is a worktree/submodule pointer file rather
   # than a directory — only the main repo's .git/config needs the overlay,
   # and the worktree resolves through the main repo's mount anyway.
-  if [ -f "$ws_abs/.git/config" ]; then
+  # Symlinks are refused at both levels: the workspace is writable from the
+  # container, and [ -f ] / cp follow links, so a planted .git or .git/config
+  # link would copy an arbitrary host file into the container.
+  if [ -d "$ws_abs/.git" ] && [ ! -L "$ws_abs/.git" ] \
+     && [ -f "$ws_abs/.git/config" ] && [ ! -L "$ws_abs/.git/config" ]; then
     cp "$ws_abs/.git/config" "$stage/git-config-$ws_name"
     cat >>"$stage/git-config-$ws_name" <<'EOF'
 

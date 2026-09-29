@@ -107,11 +107,17 @@ The sidecar SHALL run a digest-pinned upstream Caddy image (override: `CLAUDE_DO
 
 ### Requirement: Request filtering policy
 
-The sidecar SHALL enforce request policy before forwarding. The default policy SHALL block repository deletion — `DELETE` requests matching `^/repos/[^/]+/[^/]+/?$` on `api.github.com` — with a `403` response whose body identifies the claude-docker proxy policy. All other requests SHALL pass. Users SHALL be able to extend policy by pointing `CLAUDE_DOCKER_GH_POLICY` at a Caddyfile snippet that is imported into the generated sidecar config. Policy configuration SHALL NOT be readable or writable from inside the agent container.
+The sidecar SHALL enforce request policy before forwarding. The default policy SHALL block repository deletion — `DELETE` requests matching `^/(repos/[^/]+/[^/]+|repositories/[0-9]+)/?$` on `api.github.com`, i.e. both `/repos/{owner}/{repo}` and its numeric-id alias `/repositories/{id}` — with a `403` response whose body identifies the claude-docker proxy policy. All other requests SHALL pass. Users SHALL be able to extend policy by pointing `CLAUDE_DOCKER_GH_POLICY` at a Caddyfile snippet that is imported into the generated sidecar config. Policy configuration SHALL NOT be readable or writable from inside the agent container.
 
 #### Scenario: Repo deletion is blocked by default
 
 - **WHEN** `gh api -X DELETE /repos/someorg/somerepo` runs inside the agent container
+- **THEN** the response is `403` with a body identifying the claude-docker gh-proxy policy
+- **AND** the request never reaches GitHub
+
+#### Scenario: Repo deletion by numeric id is blocked by default
+
+- **WHEN** `gh api -X DELETE /repositories/123456` runs inside the agent container
 - **THEN** the response is `403` with a body identifying the claude-docker gh-proxy policy
 - **AND** the request never reaches GitHub
 
