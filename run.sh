@@ -313,9 +313,11 @@ api.github.com {
 		format json
 	}
 
+	# Both routes GitHub serves a repo on: /repos/{owner}/{repo} and the
+	# numeric-id alias /repositories/{id} (the form its Link headers use).
 	@gh_proxy_repo_delete {
 		method DELETE
-		path_regexp ^/repos/[^/]+/[^/]+/?$
+		path_regexp ^/(repos/[^/]+/[^/]+|repositories/[0-9]+)/?$
 	}
 	respond @gh_proxy_repo_delete "claude-docker gh-proxy policy: repository deletion is blocked by default. Extend policy via CLAUDE_DOCKER_GH_POLICY, or bypass the proxy entirely with --gh-direct." 403
 	import /etc/caddy/policy.caddy
