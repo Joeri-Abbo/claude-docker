@@ -20,8 +20,12 @@ python3 update_pins.py --audit
 # under `set -e`, so the here-string consumer below is fail-closed.
 tools=$(python3 update_pins.py --list-tools)
 # Columns: name, probe, version_re, version, kind, ref (ref is the npm package).
-while IFS=$'\t' read -r _name _probe _re ver kind pkg; do
+while IFS=$'\t' read -r name _probe _re ver kind pkg; do
+  # Tab is IFS whitespace, so an empty column collapses and shifts the rest
+  # left: the last field is then empty. Fail closed instead of mis-skipping.
+  [ -n "$pkg" ] || { echo "::error::malformed --list-tools row for $name"; exit 1; }
   [ "$kind" = npm ] || continue
+  [ -n "$ver" ] || { echo "::error::no pinned version for $name"; exit 1; }
   scratch=$(mktemp -d)
   ( cd "$scratch" && npm init -y >/dev/null \
     && npm install --ignore-scripts --no-audit --no-fund --silent "${pkg}@${ver}" \
