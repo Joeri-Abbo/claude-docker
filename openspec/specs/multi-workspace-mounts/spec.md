@@ -165,6 +165,8 @@ The overlay mount SHALL be writable (not `:ro`), so container-side operations th
 
 The overlay SHALL NOT be created for workspaces where `.git` is a pointer file rather than a directory (worktrees, submodules). Worktrees mounted alongside their main repo resolve through the main repo's overlay; worktrees mounted standalone (without their main repo) fall back to the existing `git worktree repair` workflow.
 
+The overlay SHALL NOT be created when `<ws>/.git` or `<ws>/.git/config` is a symbolic link, and `run.sh` SHALL NOT follow such a link when deciding whether to overlay or when copying. The workspace is writable from inside the container, so a link planted there in one session would otherwise make the next launch copy an arbitrary host file — one outside every passed workspace — into the container.
+
 #### Scenario: Container-created nested worktree is portable to the host
 
 - **GIVEN** the user runs `claude-docker <repo>` and `<repo>/.git/config` is a regular file
@@ -193,3 +195,9 @@ The overlay SHALL NOT be created for workspaces where `.git` is a pointer file r
 - **THEN** the link files SHALL be rewritten with relative paths
 - **AND** subsequent host-side and container-side git operations on that worktree SHALL succeed without further repair
 
+#### Scenario: Symlinked .git or .git/config is not overlaid
+
+- **GIVEN** a workspace whose `.git` is a symbolic link to a directory, or whose `.git/config` is a symbolic link to a file
+- **WHEN** the user runs `claude-docker <workspace>`
+- **THEN** no bind mount SHALL be created at `/workspaces/<name>/.git/config`
+- **AND** the link target's contents SHALL NOT be copied into the stage directory
