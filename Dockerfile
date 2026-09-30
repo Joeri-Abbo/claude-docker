@@ -86,6 +86,10 @@ RUN owner="$(dpkg -S /usr/bin/pebble 2>/dev/null | cut -d: -f1 || true)" \
 # tar/brace-expansion/ip-address trail their upstream fixes by one release
 # each until NodeSource's nodejs package catches up — drop the extra
 # install once it does.
+# openssl, libssl3t64 and openssl-provider-legacy are named explicitly so apt
+# upgrades them past the base image's 3.5.5-1ubuntu3.5 (CVE-2026-84782, fixed
+# in 3.5.5-1ubuntu3.6, which no ubuntu:26.04 tag carries yet) — drop them at
+# the next base-image bump that ships the fix.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl gnupg \
  && install -d -m 0755 /etc/apt/keyrings \
@@ -97,6 +101,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && apt-get update \
  && apt-get install -y --no-install-recommends \
       "nodejs=${NODE_VERSION}" \
+      openssl \
+      libssl3t64 \
+      openssl-provider-legacy \
       git \
       git-lfs \
       tmux \
