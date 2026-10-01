@@ -35,3 +35,12 @@ CVE-2026-56864 exp:2026-11-04
 # against a fix that needs 0.40.0. Each entry carries its own reason because
 # suppression is per-ID and the two are only incidentally related.
 CVE-2026-56865 exp:2026-11-04
+# npm@11.19.1 (Dockerfile) vendors brace-expansion 5.0.9; the fix needs 5.0.10.
+# No npm release bundles it yet (11.20.0 and 12.1.0 still ship 5.0.9). Only
+# npm's own tree carries it. At expiry, bump the npm pin if a release has it.
+CVE-2026-102276 exp:2026-11-04
+# Same package and gap as above; the fix needs brace-expansion 5.0.11.
+CVE-2026-102278 exp:2026-11-04
+# npm@11.19.1 vendors undici 6.28.0; the fix needs 6.28.1. No npm release
+# bundles it yet. At expiry, bump the npm pin if a release has it.
+CVE-2026-19534 exp:2026-11-04
