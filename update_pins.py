@@ -24,8 +24,7 @@ Usage:
   uv run update_pins.py --block-major-bumps  stay within each tool's current major
   uv run update_pins.py --pin uv=0.12.3      force a specific version (bypasses soak)
   uv run update_pins.py --pin pnpm=11.5.3 --pin uv=0.12.3   multiple overrides
-  python3 update_pins.py --list-npm-tools    list npm tools as TSV (name/pkg/env/var/ver)
-  python3 update_pins.py --list-tools        list all tools as TSV (name/probe/regex/ver)
+  python3 update_pins.py --list-tools        list all tools as TSV (name/probe/regex/ver/kind/ref)
   python3 update_pins.py --audit             soak-gate check against live npm registry
 
 Honors GITHUB_TOKEN / GH_TOKEN (raises the GitHub API rate limit) when set.
@@ -47,6 +46,7 @@ import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import NamedTuple
@@ -210,8 +210,7 @@ def max_stable(versions) -> str:
 
 
 def newest_within_major(versions, major: str) -> str:
-    within = [v for v in versions if SEMVER_RE.match(v) and v.split(".")[0] == major]
-    return max(within, key=_semver_key) if within else ""
+    return max_stable(v for v in versions if major_of(v) == major)
 
 
 def major_of(v: str) -> str:
@@ -220,12 +219,6 @@ def major_of(v: str) -> str:
 
 def is_major_bump(old: str, new: str) -> bool:
     return bool(old) and major_of(old) != major_of(new)
-
-
-def version_var(name: str) -> str:
-    """Return the env-var name for a tool's version pin.
-    E.g. claude-code → CLAUDE_CODE_VERSION, pnpm → PNPM_VERSION."""
-    return name.upper().replace("-", "_") + "_VERSION"
 
 
 def soak_status(pinned: str, cand, soak: timedelta, now: datetime):
@@ -315,17 +308,15 @@ def aws_cli_tags():
 
 
 # ---- resolution ------------------------------------------------------------
+@dataclass(slots=True)
 class Result:
-    __slots__ = ("status", "version", "age", "held", "held_age", "blocked_major", "note")
-
-    def __init__(self):
-        self.status = ""            # UPDATE | NOCHANGE | OVERRIDE | ERROR
-        self.version = ""
-        self.age = ""
-        self.held = ""
-        self.held_age = ""
-        self.blocked_major = ""
-        self.note = ""              # free-text annotation for the report
+    status: str = ""            # UPDATE | NOCHANGE | OVERRIDE | ERROR
+    version: str = ""
+    age: str = ""
+    held: str = ""
+    held_age: str = ""
+    blocked_major: str = ""
+    note: str = ""              # free-text annotation for the report
 
 
 def _age_days(now: datetime, iso: str) -> str:
@@ -685,48 +676,24 @@ def print_reminders():
 
 
 # ---- early-return modes (no pin refresh) -----------------------------------
-def run_list_npm_tools() -> int:
-    """Print one TSV row per npm-pinned tool (name, package, env_file, var, version).
+def run_list_tools() -> int:
+    """Print one TSV row per automated tool (name, probe, version_re, version,
+    kind, ref).
+
+    Two CI consumers: the runtime version check runs each `probe` against the
+    built image and matches the output with `version_re`; the npm supply-chain
+    audit keeps the `kind == npm` rows and installs `ref@version`.
 
     Validates ALL tools first; if any has an empty version pin it emits a
     GitHub Actions error annotation to stderr and exits non-zero WITHOUT having
     printed any partial output (fail-closed producer). NOTE: the non-zero exit
     only protects a consumer that actually checks it — capture the output via
-    `out=$(... --list-npm-tools)` (which aborts under `set -e`), NOT via a
+    `out=$(... --list-tools)` (which aborts under `set -e`), NOT via a
     `while ... done < <(...)` process substitution, whose exit code bash does
-    not propagate. See the CI audit step in .github/workflows/ci.yml.
+    not propagate. See the CI steps in .github/workflows/ci.yml.
 
     Output columns (tab-separated, no header):
-        name   package   env_file   var   version
-    """
-    npm_tools = [(t.name, t.ref) for t in TOOLS if t.kind == "npm"]
-
-    # Validate all pins before emitting anything — fail-closed.
-    rows = []
-    for name, pkg in npm_tools:
-        ver = read_current(name)
-        if not ver:
-            print(f"::error::no pinned version for {name}", file=sys.stderr)
-            return 1
-        rows.append((name, pkg, f"{name}.env", version_var(name), ver))
-
-    # All present — emit the table.
-    for name, pkg, env_file, var, ver in rows:
-        print(f"{name}\t{pkg}\t{env_file}\t{var}\t{ver}")
-    return 0
-
-
-def run_list_tools() -> int:
-    """Print one TSV row per automated tool (name, probe, version_re, version).
-
-    Covers every tool, not just npm-backed ones: the caller is CI's runtime
-    version check, which runs each `probe` against the built image and matches
-    the output with `version_re`. Same fail-closed producer contract as
-    run_list_npm_tools() — validate every pin before emitting anything, and see
-    that function's note on why a consumer must capture with `$(...)`.
-
-    Output columns (tab-separated, no header):
-        name   probe   version_re   version
+        name   probe   version_re   version   kind   ref
     """
     rows = []
     for tool in TOOLS:
@@ -734,7 +701,7 @@ def run_list_tools() -> int:
         if not ver:
             print(f"::error::no pinned version for {tool.name}", file=sys.stderr)
             return 1
-        rows.append((tool.name, tool.probe, tool.version_re, ver))
+        rows.append((tool.name, tool.probe, tool.version_re, ver, tool.kind, tool.ref))
 
     for row in rows:
         print("\t".join(row))
@@ -799,15 +766,14 @@ def parse_args(argv):
                    help="stay within each tool's current major version")
     p.add_argument("--pin", action="append", default=[], metavar="TOOL=VERSION",
                    help="force a specific version (bypasses soak); repeatable")
-    p.add_argument("--list-npm-tools", action="store_true",
-                   help="print one TSV row per npm-pinned tool (name, package, env_file, var,"
-                        " version) then exit; no pin refresh; exits non-zero if any pin is missing")
-    p.add_argument("--list-tools", action="store_true",
-                   help="print one TSV row per automated tool (name, probe, version_re, version)"
-                        " then exit; no pin refresh; exits non-zero if any pin is missing")
-    p.add_argument("--audit", action="store_true",
-                   help="verify each npm-pinned tool's installed version passes the soak gate"
-                        " (requires network); no pin refresh; exits non-zero if any tool fails")
+    mode = p.add_mutually_exclusive_group()
+    mode.add_argument("--list-tools", action="store_true",
+                      help="print one TSV row per automated tool (name, probe, version_re, version,"
+                           " kind, ref)"
+                           " then exit; no pin refresh; exits non-zero if any pin is missing")
+    mode.add_argument("--audit", action="store_true",
+                      help="verify each npm-pinned tool's installed version passes the soak gate"
+                           " (requires network); no pin refresh; exits non-zero if any tool fails")
     args = p.parse_args(argv)
     if args.soak is not None and args.soak < 0:
         p.error("--soak must be a non-negative integer")
@@ -832,22 +798,9 @@ def main(argv=None) -> int:
     args, overrides = parse_args(sys.argv[1:] if argv is None else argv)
 
     # Early-return modes — run before the normal refresh flow (no pin writes).
-    # Listings run before --audit; a non-zero exit from one short-circuits, since
-    # a later mode would have no useful input.
+    # parse_args makes them mutually exclusive, so at most one is set.
     if args.list_tools:
-        rc = run_list_tools()
-        if rc != 0:
-            return rc
-        if not (args.list_npm_tools or args.audit):
-            return 0
-
-    if args.list_npm_tools:
-        rc = run_list_npm_tools()
-        if rc != 0:
-            return rc
-        if not args.audit:
-            return 0
-
+        return run_list_tools()
     if args.audit:
         return run_audit(args.soak)
 
